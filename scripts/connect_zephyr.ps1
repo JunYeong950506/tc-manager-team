@@ -201,6 +201,7 @@ function Invoke-TcConnect {
     $tcProject = (Resolve-Path -LiteralPath $ProjectPath).Path
     $tcSettingsPath = Join-Path $tcProject '.tc-manager/zephyr-connection.json'
     $tcSettings = if (Test-Path -LiteralPath $tcSettingsPath) { Get-Content -LiteralPath $tcSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { [pscustomobject]@{} }
+    $tcSettingsBefore = $tcSettings | ConvertTo-Json -Depth 40
     if (-not $PSBoundParameters.ContainsKey('ServerName') -and $tcSettings.server_name) { $ServerName = $tcSettings.server_name }
     if ($ServerName -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]*$') { throw 'MCP 서버 이름 형식이 잘못되었습니다.' }
     if (-not $TokenPageUrl) { $TokenPageUrl = $tcSettings.token_page_url }
@@ -248,7 +249,9 @@ function Invoke-TcConnect {
         }
         if ($ClaudePath) { $tcSettings | Add-Member -NotePropertyName claude_path -NotePropertyValue $tcClaude -Force }
         if ($TokenPageUrl) { $tcSettings | Add-Member -NotePropertyName token_page_url -NotePropertyValue $TokenPageUrl -Force }
-        Write-TcJson $tcSettingsPath $tcSettings
+        if (-not (Test-Path -LiteralPath $tcSettingsPath) -or ($tcSettings | ConvertTo-Json -Depth 40) -cne $tcSettingsBefore) {
+            Write-TcJson $tcSettingsPath $tcSettings
+        }
         Write-Host 'MCP 승인과 연결을 확인합니다. 승인이 필요하면 이 창에서 Claude Code를 엽니다.'
     }
     $tcPrevious = $env:ZEPHYR_API_TOKEN
@@ -259,6 +262,13 @@ function Invoke-TcConnect {
             try { Initialize-TcRuntime -RepairCache:$RepairCache }
             catch {
                 $tcRuntimeError = $_
+                if ($tcCurrent -and -not $tcNew) {
+                    Write-Host '기존 토큰과 MCP 서버 설정은 유지했습니다. 별도로 실행한 MCP 시작 검사에서 실패했습니다.' -ForegroundColor Yellow
+                } else {
+                    Write-Host '토큰과 MCP 서버 설정은 저장된 상태입니다. MCP 시작 검사가 실패해 연결 확인은 미완료입니다.' -ForegroundColor Yellow
+                }
+                Write-Host 'Claude 앱의 현재 연결 상태는 확인하지 못했습니다. 이 결과만으로 기존 연결이 끊겼다고 판단하지 않습니다.'
+                Write-Host '기존 연결 확인은 Claude에서 Zephyr 조회로 진행하세요. 스킬 자동 업데이트 시험만 하는 경우 Connect-Zephyr.cmd 재실행은 필요하지 않습니다.'
                 if (-not $RepairCache -and $_.Exception.Message -match '^\[(EINTEGRITY|ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND|ENOENT)\]' -and (Test-TcInteractive)) {
                     Write-Host $_.Exception.Message -ForegroundColor Yellow
                     $tcRepair = Read-Host '전용 캐시를 새로 준비하고 한 번 재검사할까요? 기존 캐시는 삭제하지 않습니다. [y/N]'

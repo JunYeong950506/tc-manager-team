@@ -83,7 +83,7 @@ function Write-TcRuntimeDiagnostic($Result) {
     $tcRoot = Get-TcRuntimeRoot
     $null = New-Item -ItemType Directory -Force -Path $tcRoot
     $tcPath = Join-Path $tcRoot ('diagnostic-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.json')
-    $tcReport = [ordered]@{ time=(Get-Date).ToString('o'); package='@smartbear/mcp@0.41.0'; stage='MCP 시작 검사'; ok=$Result.ok; code=$Result.code; api_called=$false; raw_output_saved=$false }
+    $tcReport = [ordered]@{ time=(Get-Date).ToString('o'); package='@smartbear/mcp@0.41.0'; stage='MCP 시작 검사'; scope='isolated_startup_probe'; claude_connection_checked=$false; ok=$Result.ok; code=$Result.code; api_called=$false; raw_output_saved=$false }
     $tcReport.powershell_version = $PSVersionTable.PSVersion.ToString()
     $tcReport.node_version = 'unknown'
     try {
@@ -98,11 +98,12 @@ function Write-TcRuntimeDiagnostic($Result) {
 function Initialize-TcRuntime([switch]$RepairCache) {
     $tcGeneration = if ($RepairCache) { [guid]::NewGuid().ToString('N') } else { $null }
     $tcCache = if ($RepairCache) { Join-Path (Get-TcRuntimeRoot) ('cache-' + $tcGeneration) } else { Get-TcRuntimeCache }
-    Write-Host 'Zephyr 전용 npm 캐시에서 MCP 시작을 검사합니다. 최초 준비는 최대 90초 걸릴 수 있습니다.'
+    Write-Host '별도 MCP 프로세스의 시작을 검사합니다 (최대 90초). Claude 앱에서 사용 중인 연결을 검사하는 단계는 아닙니다.'
     $tcResult = Test-TcRuntime $tcCache
     Write-TcRuntimeDiagnostic $tcResult
     if (-not $tcResult.ok) {
         $tcAdvice = switch -Regex ($tcResult.code) {
+            '^START_TIMEOUT$' { '별도 MCP 프로세스에서 90초 안에 초기화 응답을 확인하지 못했습니다. 캐시 손상으로 확정된 것은 아닙니다. 잠시 후 다시 검사하고, 반복되면 진단 파일로 원인을 확인하세요. 토큰 재발급은 필요하지 않습니다.'; break }
             'EINTEGRITY|MODULE_NOT_FOUND|ENOENT' { '패키지 설치/캐시 문제일 수 있습니다. Connect-Zephyr.cmd -RepairCache로 전용 캐시를 새로 준비하세요.'; break }
             'EPERM|EACCES' { '파일 접근이 차단됐습니다. 실행 중인 Claude 작업과 보안 프로그램의 차단 내역을 확인하세요.'; break }
             'EBADENGINE' { 'Node.js 버전을 확인하세요. 22 이상이 필요합니다.'; break }
