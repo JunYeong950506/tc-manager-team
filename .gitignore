@@ -1,0 +1,21 @@
+# Only curated release paths may be added. Personal workspace files stay out.
+/*
+!/.gitignore
+!/.gitattributes
+!/.claude-plugin/
+!/plugins/
+!/scripts/
+!/README.md
+!/SETUP-WINDOWS.md
+!/setup-defaults.json
+!/MANIFEST.sha256.json
+!/Install-TC-Manager.cmd
+!/Connect-Zephyr.cmd
+!/Update-TC-Manager.cmd
+**/__pycache__/
+**/*.pyc
+**/.env*
+**/*.sqlite*
+**/*.db
+**/*.log
+**/*.bak

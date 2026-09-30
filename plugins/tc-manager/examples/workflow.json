@@ -1,0 +1,23 @@
+{
+  "example_only": true,
+  "mode": "plan",
+  "request": "개발용 합성 예시: 이름 입력 회귀 테스트 준비",
+  "status": "awaiting_review",
+  "scope": {
+    "site": "https://example.atlassian.net",
+    "project_key": "DEMO",
+    "folder_id": 42
+  },
+  "items": [
+    {
+      "id": "DEMO-T17",
+      "version": "observed-example",
+      "status": "reviewing",
+      "decision": "reuse",
+      "remote_key": "DEMO-T17",
+      "files": []
+    }
+  ],
+  "approval": null,
+  "remote_operations": []
+}

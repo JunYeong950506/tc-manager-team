@@ -1,0 +1,9 @@
+[
+  {
+    "id": "SRC-1",
+    "kind": "user_request",
+    "locator": "example-only",
+    "revision": "fixture-1",
+    "text": "개발용 합성 자료: 빈 이름 저장 시 이름을 입력하세요 표시"
+  }
+]

@@ -1,0 +1,14 @@
+{
+  "name": "tc-manager-team",
+  "description": "Portable TC management plugin for Claude Code teams",
+  "owner": {
+    "name": "SQMA"
+  },
+  "plugins": [
+    {
+      "name": "tc-manager",
+      "source": "./plugins/tc-manager",
+      "description": "TC conversion, creation and test preparation"
+    }
+  ]
+}

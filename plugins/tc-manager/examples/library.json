@@ -1,0 +1,10 @@
+{
+  "db_path": "data/tc-registry.sqlite3",
+  "namespaces": [
+    {
+      "site": "https://example.atlassian.net",
+      "project_key": "DEMO",
+      "namespace": "example.atlassian.net/DEMO"
+    }
+  ]
+}
