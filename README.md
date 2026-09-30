@@ -2,9 +2,9 @@
 
 이 디렉터리는 배포 전용입니다. `.claude-plugin/marketplace.json`의 이름은 `tc-manager-team`, 플러그인은 `plugins/tc-manager`에 있습니다. 현재 버전은 해당 폴더의 `.claude-plugin/plugin.json`으로 확인합니다.
 
-## 현재 준비 상태
+## 배포 저장소
 
-Git 원격 URL과 조직의 연결 방식은 별도로 지정해야 합니다. 이 파일이 있다는 것만으로 저장소 게시·Claude 연결·자동 업데이트가 완료된 것은 아닙니다. SQMA 작업 폴더나 팀원의 기존 설치 폴더 전체를 Git으로 올리지 않습니다.
+저장소: https://github.com/JunYeong950506/tc-manager-team (비공개). 연결 URL은 `https://github.com/JunYeong950506/tc-manager-team.git`입니다. 팀원은 저장소 읽기 권한과 자기 GitHub 인증이 필요합니다. 이 저장소를 받는 것만으로 각 PC의 Claude 연결이나 자동 업데이트가 켜지는 것은 아닙니다. SQMA 작업 폴더나 팀원의 기존 설치 폴더 전체를 Git으로 올리지 않습니다.
 
 ## 업데이트 범위
 
@@ -22,11 +22,11 @@ Git 원격 URL과 조직의 연결 방식은 별도로 지정해야 합니다. �
 등록 이름 `tc-manager-team`이 없는 경우, 실제 저장소 URL로 다음을 실행합니다. 토큰을 URL에 넣지 않습니다. 비공개 저장소는 각 PC의 Git 인증이 미리 되어 있어야 합니다.
 
 ```text
-claude plugin marketplace add <Git-저장소-URL> --scope local
+claude plugin marketplace add https://github.com/JunYeong950506/tc-manager-team.git --scope local
 claude plugin install tc-manager@tc-manager-team --scope local
 ```
 
-고정된 사용자 작업 폴더에서 실행합니다. `claude plugin marketplace list --json`으로 source가 원격 저장소인지 확인합니다. 이미 같은 이름의 로컬/다른 원격 마켓플레이스가 있으면 즉시 재등록하거나 remove하지 않습니다. remove는 설치된 플러그인까지 제거할 수 있으므로 설치 scope·활성 상태·연결 설정을 확인한 뒤 전환합니다. 실제 URL이 정해지면 기존 사용자 전환을 별도로 검증해야 합니다.
+고정된 사용자 작업 폴더에서 실행합니다. `claude plugin marketplace list --json`으로 source가 원격 저장소인지 확인합니다. 기존 로컬 `tc-manager-team`에서 전환할 때는 설정을 백업하고 설치 scope·활성 상태·다른 작업 폴더의 사용 여부를 확인한 뒤 같은 add 명령으로 Git 원격을 등록합니다. 이 경로는 현재 배포자의 CLI에서 설정 보존을 확인했으며 팀원 PC에서는 전환 후 상태를 확인해야 합니다. remove는 설치된 플러그인까지 제거할 수 있으므로 전환 목적으로 먼저 실행하지 않습니다.
 
 일반 업데이트:
 
