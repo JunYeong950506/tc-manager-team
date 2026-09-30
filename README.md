@@ -4,7 +4,7 @@
 
 ## 배포 저장소
 
-저장소: https://github.com/JunYeong950506/tc-manager-team (비공개). 연결 URL은 `https://github.com/JunYeong950506/tc-manager-team.git`입니다. 팀원은 저장소 읽기 권한과 자기 GitHub 인증이 필요합니다. 이 저장소를 받는 것만으로 각 PC의 Claude 연결이나 자동 업데이트가 켜지는 것은 아닙니다. SQMA 작업 폴더나 팀원의 기존 설치 폴더 전체를 Git으로 올리지 않습니다.
+저장소: https://github.com/JunYeong950506/tc-manager-team (공개). 연결 URL은 `https://github.com/JunYeong950506/tc-manager-team.git`입니다. 팀원은 다운로드·업데이트를 위해 별도 저장소 초대나 GitHub 인증을 받을 필요가 없습니다. 이 저장소를 받는 것만으로 각 PC의 Claude 연결이나 자동 업데이트가 켜지는 것은 아닙니다. SQMA 작업 폴더나 팀원의 기존 설치 폴더 전체를 Git으로 올리지 않습니다.
 
 ## 업데이트 범위
 
