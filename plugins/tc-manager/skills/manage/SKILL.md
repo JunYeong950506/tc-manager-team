@@ -8,6 +8,8 @@ user-invocable: false
 
 사용자 요청: $ARGUMENTS
 
+Story↔TC 연결, 작성 근거, Story/TC 검색, TC 없는 Story 조회 요청은 `../../references/story-traceability.md`와 `../../references/library.md`로 처리한다. 조회 요청을 신규 생성이나 변경으로 해석하지 않는다.
+
 약식 수행 준비·상태 조회·실행 피드백 반영 요청이면 `../../references/readiness-workflow.md`를 읽어 기존 TC 버전과 연결한다. 피드백에 TC 보완이 필요할 때만 아래 convert 절차로 이어간다. 실제 테스트를 수행하라는 요청은 실행 Agent용 handoff까지 준비하고, 실행 도구가 없으면 미수행을 명시한다.
 
 그 외에는 아래 중 해당 Skill 하나에 요청·첨부·기존 결과를 그대로 전달한다. 명령 이름을 사용자에게 다시 고르라고 요구하지 않는다.

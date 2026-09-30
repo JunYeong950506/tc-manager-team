@@ -1,4 +1,4 @@
-"""Portable adapter for the existing registry. Local files only; no remote writes."""
+"""TC and Story storage adapter. Local SQLite or the authenticated shared service."""
 
 import argparse
 from contextlib import closing
@@ -10,6 +10,8 @@ from urllib.parse import urlsplit
 
 import tc_registry as registry
 import tc_draft as draft_core
+import tc_stories as stories
+from tc_shared import Remote
 
 
 def settings(path, site, project):
@@ -28,8 +30,20 @@ def settings(path, site, project):
         identities.add(identity)
         namespaces.add(row["namespace"])
     match = [row for row in bindings if (row["site"].rstrip("/").lower(), row["project_key"]) == (site, project)]
+    if not match and config.get("backend") == "shared":
+        if not re.fullmatch(r"[A-Z][A-Z0-9_]*", project):
+            raise ValueError("실제 Jira 프로젝트 키가 필요합니다")
+        namespace = parsed.hostname.lower() + "/" + project
+        if namespace in namespaces:
+            raise ValueError("새 프로젝트 namespace가 기존 매핑과 충돌합니다")
+        return Remote(config, namespace), namespace
     if len(match) != 1:
         raise ValueError("요청한 사이트/프로젝트의 DB 매핑이 없습니다. 다른 프로젝트를 대신 검색하지 않습니다")
+    backend = config.get("backend", "local")
+    if backend == "shared":
+        return Remote(config, match[0]["namespace"]), match[0]["namespace"]
+    if backend != "local":
+        raise ValueError("backend는 local 또는 shared여야 합니다")
     db = Path(config["db_path"])
     if not db.is_absolute():
         db = path.parent.parent / db
@@ -37,6 +51,8 @@ def settings(path, site, project):
 
 
 def search(db_path, namespace, query, limit=10):
+    if isinstance(db_path, Remote):
+        return db_path.rpc("cases.list", dict(q=query, limit=limit, group_by_id=True))
     if not 1 <= limit <= 100 or not registry.tokens(query):
         raise ValueError("검색어와 1~100 사이 limit가 필요합니다")
     if not Path(db_path).is_file():
@@ -103,7 +119,7 @@ def bundle_from_draft(draft, evidence, tc_id, version, model, producer, mode, re
             "expected_result": step["expected_result"], "source_refs": step_refs[i - 1]}
             for i, step in enumerate(draft["steps"], 1)], "open_questions": draft["blockers"]}
     return {"schema_version": "2.0", "run": {"id": tc_id + ":" + version, "mode": mode,
-        "created_at": draft_core.stamp(), "producer": producer, "model": model, "plugin_version": "1.4.0",
+        "created_at": draft_core.stamp(), "producer": producer, "model": model, "plugin_version": json.loads((Path(__file__).resolve().parents[1] / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))["version"],
         "review_mode": review_mode}, "sources": sources, "test_cases": [tc], "plan": None,
         "review": {"status": "pending", "rounds": 0, "findings": []},
         "changes": [{"target": "/test_cases/0", "reason": text} for text in draft["decisions"] if text.strip()],
@@ -112,7 +128,7 @@ def bundle_from_draft(draft, evidence, tc_id, version, model, producer, mode, re
 
 def store(db_path, namespace, draft, evidence, **kwargs):
     bundle = bundle_from_draft(draft, evidence, **kwargs)
-    result = registry.ingest(db_path, bundle, namespace)
+    result = db_path.rpc("imports.add", dict(bundle=bundle)) if isinstance(db_path, Remote) else registry.ingest(db_path, bundle, namespace)
     result["review_status"] = "pending; tc_readiness.py로 본문 해시에 연결한 검토 기록을 저장하십시오. 사람 승인은 별도입니다"
     return result
 
@@ -122,15 +138,27 @@ def select_verified(db_path, namespace, prepared, version, expected_version=None
     if state["status"] != "verified":
         raise ValueError("원격 재조회 verified 상태만 기준 버전으로 선택할 수 있습니다")
     key = state["remote_key"]
-    existing = registry.show(db_path, namespace, key, version)["test_case"]
+    existing = (db_path.rpc("cases.get", dict(id=key, version=version)) if isinstance(db_path, Remote) else registry.show(db_path, namespace, key, version))["test_case"]
     if any(existing[name] != draft[name] for name in ("title", "objective", "precondition")):
         raise ValueError("DB 본문과 재조회 확인본이 다릅니다")
     script = [{k: step[k] for k in ("step", "test_data", "expected_result")}
               for step in existing.get("test_script", [])]
     if script != [{k: step[k] for k in ("step", "test_data", "expected_result")} for step in draft["steps"]]:
         raise ValueError("DB 단계와 재조회 확인본이 다릅니다")
+    if isinstance(db_path, Remote):
+        return db_path.rpc("cases.current", dict(id=key, version=version, expected_version=expected_version, reason="재조회 검증본 " + state["draft_hash"]))
     return registry.set_current(db_path, namespace, key, version, expected_version=expected_version,
         actor="tc-manager/readback", reason="재조회 검증본 " + state["draft_hash"])
+
+
+def story_call(db_path, namespace, op, args):
+    if isinstance(db_path, Remote):
+        return db_path.rpc(op, args)
+    if not db_path.is_file() and op not in stories.WRITE_OPS:
+        return dict(status="unavailable", reason="DB 미생성")
+    with closing(registry.connect(db_path, create=op in stories.WRITE_OPS)) as db, db:
+        db.execute("BEGIN IMMEDIATE" if op in stories.WRITE_OPS else "BEGIN")
+        return stories.execute(db, namespace, op, args)
 
 
 def main():
@@ -143,6 +171,25 @@ def main():
     p.add_argument("query")
     p.add_argument("--limit", type=int, default=10)
     commands.add_parser("stats")
+    commands.add_parser("connection")
+    p = commands.add_parser("shared-rpc")
+    p.add_argument("operation", choices=("readiness.get", "readiness.record", "cases.current", "cases.review"))
+    p.add_argument("file", type=Path)
+    p = commands.add_parser("stories-import")
+    p.add_argument("file", type=Path)
+    p = commands.add_parser("stories-search")
+    p.add_argument("query", nargs="?", default="")
+    p.add_argument("--unlinked", action="store_true")
+    p.add_argument("--limit", type=int, default=20)
+    p.add_argument("--offset", type=int, default=0)
+    p = commands.add_parser("story")
+    p.add_argument("key")
+    p = commands.add_parser("tc-stories")
+    p.add_argument("tc_id")
+    p.add_argument("--version")
+    for command in ("link-plan", "link-record", "ingest"):
+        p = commands.add_parser(command)
+        p.add_argument("file", type=Path)
     p = commands.add_parser("show")
     p.add_argument("tc_id")
     p.add_argument("--version")
@@ -159,12 +206,42 @@ def main():
     p.add_argument("--expected-version")
     args = parser.parse_args()
     db, namespace = settings(args.config, args.site, args.project)
-    if args.command == "search":
+    if args.command == "connection":
+        result = db.rpc("context") if isinstance(db, Remote) else dict(backend="local", namespace=namespace, db_path=str(db))
+        if isinstance(db, Remote) and "*" not in result.get("namespaces", []) and namespace not in result.get("namespaces", []):
+            raise ValueError("공용 서버에 이 프로젝트의 namespace 권한이 없습니다")
+    elif args.command == "shared-rpc":
+        if not isinstance(db, Remote):
+            raise ValueError("shared-rpc는 공용 서버 설정에서만 사용합니다")
+        payload = draft_core.load(args.file)
+        if not isinstance(payload, dict) or "principal" in payload:
+            raise ValueError("서버가 사용자 권한을 결정합니다. 작업 인자 객체만 전달하세요")
+        result = db.rpc(args.operation, payload)
+    elif args.command == "stories-import":
+        payload = draft_core.load(args.file)
+        for row in payload.get("stories", []):
+            if not row["key"].startswith(args.project + "-") or row["source_url"] != args.site.rstrip("/") + "/browse/" + row["key"]:
+                raise ValueError("Story 사이트/프로젝트가 선택한 DB와 다릅니다")
+        result = story_call(db, namespace, "stories.import", payload)
+    elif args.command == "stories-search":
+        result = story_call(db, namespace, "stories.search", dict(q=args.query, limit=args.limit, offset=args.offset, unlinked=args.unlinked))
+    elif args.command == "story":
+        result = story_call(db, namespace, "stories.get", dict(key=args.key))
+    elif args.command == "tc-stories":
+        result = story_call(db, namespace, "stories.for-case", dict(tc_id=args.tc_id, version=args.version))
+    elif args.command in {"link-plan", "link-record"}:
+        result = story_call(db, namespace, "stories.links." + ("plan" if args.command == "link-plan" else "record"), draft_core.load(args.file))
+    elif args.command == "ingest":
+        bundle = draft_core.load(args.file)
+        if any(not re.fullmatch(re.escape(args.project) + r"-T[1-9][0-9]*|DRAFT-[A-Za-z0-9_.-]+", tc["id"]) for tc in bundle["test_cases"]):
+            raise ValueError("이관 TC의 프로젝트가 설정과 다릅니다")
+        result = db.rpc("imports.add", dict(bundle=bundle)) if isinstance(db, Remote) else registry.ingest(db, bundle, namespace)
+    elif args.command == "search":
         result = search(db, namespace, args.query, args.limit)
     elif args.command == "stats":
-        result = registry.stats(db, namespace) if db.is_file() else {"status": "unavailable", "reason": "DB 미생성"}
+        result = db.rpc("overview") if isinstance(db, Remote) else registry.stats(db, namespace) if db.is_file() else {"status": "unavailable", "reason": "DB 미생성"}
     elif args.command == "show":
-        result = registry.show(db, namespace, args.tc_id, args.version)
+        result = db.rpc("cases.get", dict(id=args.tc_id, version=args.version)) if isinstance(db, Remote) else registry.show(db, namespace, args.tc_id, args.version)
     elif args.command == "store":
         if not re.fullmatch(re.escape(args.project) + r"-T[1-9][0-9]*|DRAFT-[A-Za-z0-9_.-]+", args.tc_id):
             raise ValueError("TC ID가 요청 프로젝트 또는 DRAFT- 식별자가 아닙니다")

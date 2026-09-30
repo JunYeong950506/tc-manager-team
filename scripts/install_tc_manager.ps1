@@ -17,6 +17,13 @@ function Test-TcPython {
     throw '[PYTHON_MISSING] Python 3.10 이상이 필요합니다. Python 실행기 또는 PATH 등록을 확인하세요.'
 }
 
+function Test-TcGit {
+    $tcGit = Get-Command git.exe -ErrorAction SilentlyContinue
+    if (-not $tcGit) { throw '[GIT_MISSING] Git for Windows가 필요합니다. 원격 플러그인 설치·업데이트에 사용합니다.' }
+    $tcVersion = & $tcGit.Source --version
+    if ($LASTEXITCODE -ne 0 -or $tcVersion -notmatch '^git version ') { throw '[GIT_START_FAILED] Git을 실행하지 못했습니다. 설치 또는 PATH를 확인하세요.' }
+}
+
 function Test-TcClaude {
     $tcExecutable = Resolve-TcClaude ''
     $tcVersion = & $tcExecutable --version
@@ -25,6 +32,7 @@ function Test-TcClaude {
 
 function Get-TcMissingPrerequisites {
     $tcRequirements = @(
+        @{ Name='Git for Windows'; Id='Git.Git'; Check={ Test-TcGit } },
         @{ Name='Node.js 22+ (npm/npx)'; Id='OpenJS.NodeJS.LTS'; Check={ Test-TcNode } },
         @{ Name='Python 3.10+'; Id='Python.Python.3.12'; Check={ Test-TcPython } },
         @{ Name='Claude Code CLI'; Id='Anthropic.ClaudeCode'; Check={ Test-TcClaude } }
@@ -44,6 +52,21 @@ function Update-TcProcessPath {
         $env:Path
     )
     $env:Path = (($tcPaths -join ';') -split ';' | Where-Object { $_ } | Select-Object -Unique) -join ';'
+    $tcKnownPrograms = @(
+        "$env:USERPROFILE\.local\bin\claude.exe",
+        "$env:LOCALAPPDATA\Microsoft\WinGet\Links\claude.exe",
+        "$env:ProgramFiles\Git\cmd\git.exe",
+        "${env:ProgramFiles(x86)}\Git\cmd\git.exe",
+        "$env:LOCALAPPDATA\Programs\Git\cmd\git.exe",
+        "$env:ProgramFiles\nodejs\node.exe",
+        "$env:APPDATA\npm\claude.cmd"
+    )
+    foreach ($tcProgram in $tcKnownPrograms) {
+        if (Test-Path -LiteralPath $tcProgram -PathType Leaf) {
+            $tcDirectory = Split-Path -Parent $tcProgram
+            if ($tcDirectory -notin ($env:Path -split ';')) { $env:Path += ';' + $tcDirectory }
+        }
+    }
 }
 
 function Install-TcPrerequisite([string]$PackageId) {
@@ -127,6 +150,15 @@ function Get-TcWorkspaceConfiguration([string]$Root, [string]$Site, [string]$Pro
         }
     }
     return [pscustomobject]@{ Target=$tcTarget; Library=$tcLibrary; TargetPath=$tcTargetPath; LibraryPath=$tcLibraryPath }
+}
+
+function Get-TcDefaultWorkspaceConfiguration([string]$Root) {
+    $tcDefaults = Get-Content -LiteralPath (Join-Path $Root 'setup-defaults.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    $tcTarget = Get-Content -LiteralPath (Join-Path $Root '.tc-manager/target.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($tcTarget.site -and $tcTarget.site.TrimEnd('/').ToLowerInvariant() -eq $tcDefaults.site.TrimEnd('/').ToLowerInvariant()) {
+        return Get-TcWorkspaceConfiguration -Root $Root
+    }
+    return $null
 }
 
 function Save-TcWorkspaceConfiguration($Configuration) {

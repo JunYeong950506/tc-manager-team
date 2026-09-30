@@ -161,6 +161,8 @@ function Resolve-TcClaude([string]$Requested) {
     if (Test-Path -LiteralPath $tcStandalone) { return $tcStandalone }
     $tcInstalled = Get-Command claude.exe -ErrorAction SilentlyContinue
     if ($tcInstalled) { return $tcInstalled.Source }
+    $tcNpmInstalled = Get-Command claude.cmd -ErrorAction SilentlyContinue
+    if ($tcNpmInstalled) { return $tcNpmInstalled.Source }
     throw '[CLAUDE_MISSING] Claude Code를 찾지 못했습니다. Install-TC-Manager.cmd로 설치하거나 -ClaudePath를 지정하세요.'
 }
 

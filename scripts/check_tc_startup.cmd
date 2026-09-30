@@ -1,0 +1,10 @@
+@echo off
+setlocal
+set "TC_STARTUP_SCRIPT=%~1"
+where powershell.exe >nul 2>nul
+if errorlevel 1 (
+  echo [POWERSHELL_MISSING] Windows PowerShell was not found. Check Windows installation or PATH.
+  exit /b 1
+)
+powershell.exe -NoProfile -Command "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); $ErrorActionPreference='Stop'; try { $p=$env:TC_STARTUP_SCRIPT; if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { Write-Host '[SCRIPT_MISSING] Extract the complete ZIP before running this CMD.'; exit 1 }; $dir=Split-Path -Parent $p; $names=@('connect_zephyr.ps1','start_zephyr_mcp.ps1','zephyr_runtime.ps1'); if ((Split-Path -Leaf $p) -ne 'connect_zephyr.ps1') { $names+='install_tc_manager.ps1' }; if ((Split-Path -Leaf $p) -eq 'update_tc_manager.ps1') { $names+=@('update_tc_manager.ps1','update_tc_manager_remote.ps1') }; foreach ($name in $names) { $path=Join-Path $dir $name; if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { Write-Host ('[SCRIPT_MISSING] Extract the complete ZIP. Missing: '+$name); exit 1 }; $file=Get-Item -LiteralPath $path; $bytes=[IO.File]::ReadAllBytes($file.FullName); if ($bytes.Length -lt 3 -or $bytes[0] -ne 239 -or $bytes[1] -ne 187 -or $bytes[2] -ne 191) { Write-Host ('[PS_ENCODING_ERROR] Expected UTF-8 with BOM: '+$file.Name); Write-Host 'Extract the latest complete ZIP again. Keep existing settings. Save edited PS1 files as UTF-8 with BOM.'; exit 1 }; $null=([Text.UTF8Encoding]::new($true,$true)).GetString($bytes); $tokens=$null; $parseErrors=$null; $null=[Management.Automation.Language.Parser]::ParseFile($file.FullName,[ref]$tokens,[ref]$parseErrors); if ($parseErrors.Count) { Write-Host ('[PS_PARSE_ERROR] '+$file.Name+' / line '+$parseErrors[0].Extent.StartLineNumber); Write-Host 'Extract the latest complete ZIP again. Share this error screen if it persists.'; exit 1 } }; exit 0 } catch [Text.DecoderFallbackException] { Write-Host '[PS_ENCODING_ERROR] Invalid UTF-8 bytes. Extract the latest complete ZIP again.'; exit 1 } catch { Write-Host '[STARTUP_CHECK_FAILED] Share this screen with the package maintainer.'; Write-Host $_.Exception.GetType().Name; exit 1 }"
+exit /b %errorlevel%

@@ -1,5 +1,21 @@
 # TC 저장과 후보 검색
 
+## 공용 PC 연결
+
+공용 서버의 등록 사용자는 모두 admin·전체 프로젝트 권한을 사용한다. 최초 접근하는 프로젝트는 요청에서 확인한 실제 Jira 사이트와 프로젝트 키로 `<사이트호스트>/<프로젝트키>` namespace를 결정한다. 기존 명시적 매핑은 그대로 우선한다. 서버 권한을 추가하거나 코드에 프로젝트 목록을 수정할 필요가 없다. Jira/Zephyr 자체의 접근 권한은 별개이며, 프로젝트 자동 구획 생성은 실제 자료 수집이나 원격 권한 확인을 뜻하지 않는다. 로컬 모드는 기존 매핑 정책을 유지한다.
+
+기본은 기존 로컬 DB다. `Connect-TC-Library.cmd`를 실행하고 운영자가 알려준 HTTPS 주소와 개인 TC 서버 토큰을 입력하면 권한 확인 후 다음 설정을 추가한다. 원본 설정은 백업하며 db_path와 namespace는 보존한다. 토큰 자체는 JSON에 저장하지 않는다.
+
+```json
+{"backend":"shared","server_url":"https://tc-server.example.invalid:5190","token_env":"TC_MANAGER_TOKEN"}
+```
+
+아래 tc_library 명령은 이 설정에서 공용 API로 조회·저장한다. 장애 시 로컬 저장으로 전환하지 않는다. `connection`으로 현재 서버 접근 권한을 확인한다. `backend:local`로 복귀하면 보존된 로컬 DB를 사용하지만 공용 서버의 변경 사항이 자동 복사되지는 않는다. 공용 서버 설치와 기존 DB 이관은 서버 패키지의 README를 따른다. 플러그인 자동 업데이트만으로 서버 설치·로컬 데이터 이관이 완료되지 않는다.
+
+공용 모드에서 tc_registry.py/tc_readiness.py에 로컬 --db를 넘기지 않는다. 원본 bundle 저장은 `tc_library.py ... ingest <bundle.json>`을 사용한다. readiness.get, readiness.record, cases.current, cases.review는 `tc_library.py ... shared-rpc <operation> <args.json>`으로 호출한다. 작업 인자는 기존 tc_service RPC 규격이며 namespace와 사용자 권한은 설정과 서버가 결정한다. readiness.get 인자는 id/version, readiness.record는 event 객체, cases.current는 id/version/expected_version/reason이다. 현재 버전 선택·승인은 reviewer/admin 권한이 필요하며 권한 부족을 우회하지 않는다. 검토 이벤트와 승인/실제 시험 결과를 구분한다.
+
+공용 검색은 서버의 versions/current_version 표시를 보고 기준 버전을 구분한다. 과거 후보가 함께 반환될 수 있으므로 마지막 항목이나 버전 이름만으로 최신을 고르지 않는다. Story 조회·연결은 `story-traceability.md`를 따른다.
+
 ## 설정과 현재 데이터
 `scripts/tc_library.py`는 기존 SQLite registry 스키마를 재사용한다. Python 3.10+ 표준 라이브러리만 필요하다. `tc_registry.py`와 `qa_manage.py`는 기존 구현을 변경 없이 포함한다. DB를 새로 만들어 과거 TC를 숨기거나 기존 DB를 초기화하지 않는다.
 프로젝트 `.tc-manager/library.json`:
@@ -13,8 +29,8 @@
 ```
 상대 db_path는 .tc-manager의 상위 프로젝트 폴더 기준이다. 기존 namespace가 있다면 사이트/프로젝트와의 실제 관계를 확인해 매핑하고 바꾸지 않는다. 한 namespace를 두 사이트/프로젝트에 재사용하지 않는다. 요청한 프로젝트 매핑이 없으면 다른 프로젝트를 대신 검색하지 않는다.
 
-팀 설치기는 기본 사이트의 PX·PXW 매핑을 함께 준비한다. 요청의 TC/Jira 키·링크에서 프로젝트를 결정해 `--site`와 `--project`를 전달한다. 여러 프로젝트를 요청하면 각각 조회·저장하며 결과에도 프로젝트를 표시한다. 기존 DB 경로·namespace는 유지하고 없는 매핑만 추가한다. 매핑 생성은 TC 수집이나 접근 권한 확인이 아니며, DB가 비어 있으면 수집 범위를 명시한다.
-이 파일은 로컬 설정이며 팀 배포물에 실제 값·DB·인증을 포함하지 않는다. 각 PC의 SQLite는 자동 공유되지 않는다. 공용 DB가 별도 서비스로 운영되면 그 서비스의 실제 검색/저장 도구를 사용하고, 로컬 DB를 공용으로 보고하지 않는다. 네트워크 공유 드라이브의 SQLite를 동시 사용하도록 제안하지 않는다.
+팀 설치기는 기본 사이트의 PX·PXW·PXM 매핑을 함께 준비한다. 요청의 TC/Jira 키·링크에서 프로젝트를 결정해 `--site`와 `--project`를 전달한다. 여러 프로젝트를 요청하면 각각 조회·저장하며 결과에도 프로젝트를 표시한다. 기존 DB 경로·namespace는 유지하고 없는 매핑만 추가한다. 매핑 생성은 TC 수집이나 접근 권한 확인이 아니며, DB가 비어 있으면 수집 범위를 명시한다.
+이 파일은 로컬 설정이며 팀 배포물에 실제 값·DB·인증을 포함하지 않는다. 각 PC의 SQLite는 자동 공유되지 않는다. 공용 서비스 연결은 위 shared 설정을 사용하고, 로컬 DB를 공용으로 보고하지 않는다. 네트워크 공유 드라이브의 SQLite를 동시 사용하도록 제안하지 않는다.
 
 ## 검색
 아래 <plugin>, <site>, <project>는 실제 설치 위치와 설정 값이다. 사용자에게 내부 CLI를 직접 조립하라고 요구하지 않고 Agent가 실행한다.

@@ -30,6 +30,8 @@ Zephyr의 대상 프로젝트·폴더에서 More → Import from file → Zephyr
 
 ## 결과
 
+원본 Jira 요구사항이 있는 등록 작업은 `story-traceability.md`로 원본 Issue Link를 생성하고 재조회한다. 본문·단계 검증과 링크 검증을 모두 통과해야 전체 완료다. 링크만 실패하면 이미 생성된 TC key와 남은 연결을 보고하며 TC를 다시 만들지 않는다.
+
 XML 가져오기 후 MCP 재조회도 불가능하면 Zephyr UI에서 **생성된 그 TC만 선택해 Export to XML**로 다시 내보낸다. 원래 가져오기 파일을 재조회 근거로 쓰지 않는다. `tc_draft.py verify-xml <prepared> --export <실제내보내기.xml> --folder-path <UI에서확인한전체폴더경로>`로 원격 key·전체 폴더 경로·제목·본문·모든 단계의 일치를 확인한다. 이 방법은 XML 내보내기 대조이며 API 재조회로 표시하지 않는다. 성공 화면·실제 key·폴더 URL도 함께 보존한다.
 
 제목·원격 key/링크·실제 목적지·본문/단계 대조 결과·사용한 경로(MCP/Import)·남은 질문을 짧게 보여준다. Markdown/JSON/XML 경로도 제공한다. 검증 완료 후 library.md에 따라 실제 원격 key의 확인본을 DB에 저장한다. 실제 테스트 실행은 수행하지 않았다고 명확히 구분한다.

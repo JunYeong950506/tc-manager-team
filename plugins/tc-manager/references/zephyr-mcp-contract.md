@@ -18,6 +18,10 @@
 | Cycle 폴더 생성 | `create_folder`: `projectKey`, `name`, `folderType=TEST_CYCLE`, `parentId` | TC 폴더와 별도 ID. 부모도 TEST_CYCLE인지 검증 |
 | Cycle 생성 | `create_test_cycle`: `projectKey`, `name`, `folderId` | 실제 key와 project·folder.id·name 재조회 |
 | 기존 TC 연결 | `create_test_execution`: `projectKey`, `testCaseKey`, `testCycleKey`, `statusName=Not Executed` | 실제 미실행 상태를 조회. 반복 연결은 tc_cycle.py 사용 |
+| TC의 Jira 연결 조회 | `get_test_case_links`: `testCaseKey` | structuredContent의 issues[].issueId와 type을 확인. type 누락은 UNKNOWN이며 Coverage로 추정하지 않음 |
+| 원본 Jira 연결 | `create_test_case_issue_link`: `testCaseKey`, `issueId: <양의 정수>` | 티켓 키 대신 실제 숫자 Jira ID 사용. 생성은 멱등이 아니므로 기존 Coverage를 확인하고 쓰기 후 재조회 |
+
+Jira 연결 필드는 설치된 @smartbear/mcp 0.41.0의 get-links.js/create-issue-link.js와 rest-api-schemas.js를 대조했다. issues/type이 생략될 수 있으므로 누락을 빈 연결·Coverage로 만들어 저장하지 않는다. `story-traceability.md`의 link-plan이 기존 연결 유형을 확인할 수 없으면 추가 생성 전에 재조회한다.
 
 Cycle 연결 REST 계약은 조회 `GET /testexecutions/nextgen`의 `limit/startAtId/nextStartAtId`와 생성 `POST /testexecutions/`를 구분한다. 목록의 한 페이지나 POST 성공 개수만으로 전체 완료를 판단하지 않는다. test-preparation.md의 전 페이지 key 집합·중복·상태 검증을 따른다.
 

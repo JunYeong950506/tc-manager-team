@@ -87,6 +87,7 @@ function Invoke-TcRemoteUpdate {
                 throw '[CUSTOM_SHORTCUT] 사용자가 수정한 /tc-manager 단축어가 있습니다. 변경 내용을 먼저 확인하세요. 덮어쓰지 않았습니다.'
             }
         }
+        $tcWorkspace = Get-TcDefaultWorkspaceConfiguration $tcRoot
         if ($CheckOnly) { Write-Host '사전 점검 완료. 원격 조회·설치·설정 변경은 하지 않았습니다.'; return }
         $tcBackup = Join-Path $tcRoot ('.tc-manager/backups/remote-update-' + [guid]::NewGuid().ToString('N'))
         $null = New-Item -ItemType Directory -Path $tcBackup -Force
@@ -134,6 +135,7 @@ function Invoke-TcRemoteUpdate {
         }
         $null = New-Item -ItemType Directory -Path (Split-Path -Parent $tcAlias) -Force
         Copy-Item -LiteralPath (Join-Path $tcAfter.installPath 'references/short-command/SKILL.md') -Destination $tcAlias -Force
+        if ($tcWorkspace) { Save-TcWorkspaceConfiguration $tcWorkspace }
         Set-TcMarketplaceAutoUpdate $tcSettings $tcUrl $true
         Set-TcMarketplaceAutoUpdate $tcKnown $tcUrl $true -KnownMarketplaces
         $tcDisabled = @('DISABLE_UPDATES', 'DISABLE_AUTOUPDATER', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC') | Where-Object { [Environment]::GetEnvironmentVariable($_) -eq '1' }

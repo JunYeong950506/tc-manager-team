@@ -1,6 +1,6 @@
 {
   "name": "tc-manager",
-  "version": "1.4.8",
+  "version": "1.5.1",
   "description": "기존 TC 정리·신규 TC 작성·테스트 준비. 근거 탐색, DB 대조, 최종 검토와 Zephyr 반영",
   "author": {
     "name": "SQMA"

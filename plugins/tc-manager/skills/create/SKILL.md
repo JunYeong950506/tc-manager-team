@@ -20,3 +20,5 @@ argument-hint: 요구사항 또는 Jira 링크
 6. 승인한 TC는 `../../references/publish-new.md`로 신규 등록하고 재조회한다. Precondition의 구역 제목·각 항목은 별도 줄, 구역 사이는 빈 줄로 작성하고 prepare의 HTML payload를 그대로 전달한다. 실제 key·본문·줄 구분·전 단계가 확인된 뒤 library.md로 DB 확인본을 저장한다. 인증·도구 제약이면 초안과 재개 위치를 남기고 성공으로 표시하지 않는다.
 
 결과: 읽기용 TC + 출처 + 기존 TC와 차이 + DB 저장 결과 + Zephyr 실제 key/반영 상태. 테스트 실행과 Pass/Fail은 포함하지 않는다.
+
+Jira 요구사항에서 작성한 TC는 `../../references/story-traceability.md`에 따라 원본 티켓의 다대다 Coverage 연결도 등록·재조회하고, 본문 검증과 링크 검증 결과를 분리해 표시한다.

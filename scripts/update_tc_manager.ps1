@@ -75,6 +75,7 @@ function Invoke-TcUpdate {
             }
         }
         Write-Host ("Workspace: {0}`nPlugin: {1} -> {2}" -f $tcRoot, $tcBefore.version, $tcVersion)
+        $tcWorkspace = Get-TcDefaultWorkspaceConfiguration $tcRoot
         if ($CheckOnly) { Write-Host 'Update prerequisites checked. Nothing changed; installed content was not updated.'; return }
 
         $tcBackup = Join-Path $tcRoot ('.tc-manager/backups/update-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N'))
@@ -113,6 +114,7 @@ function Invoke-TcUpdate {
             if ((Get-TcFileDigest (Join-Path $tcRoot $tcName)) -ne $tcProtected[$tcName]) { throw ('Workspace setting changed during update: ' + $tcName + '. Review the saved backup; update was not reported as complete.') }
         }
         $null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $tcAlias)
+        if ($tcWorkspace) { Save-TcWorkspaceConfiguration $tcWorkspace }
         Copy-Item -LiteralPath $tcAliasSource -Destination $tcAlias -Force
         $tcMcpPath = Join-Path $tcRoot '.mcp.json'
         if (Test-Path -LiteralPath $tcMcpPath) {

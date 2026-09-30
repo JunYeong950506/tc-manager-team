@@ -8,6 +8,8 @@ argument-hint: 시험 목적·범위·릴리스 또는 변경 티켓
 
 사용자 요청: $ARGUMENTS
 
+Story↔TC·작성 근거·미연결 후보의 조회만 요청했다면 `../../references/story-traceability.md`와 `../../references/library.md`로 처리하고 아래 테스트 준비·Cycle 생성 절차를 시작하지 않는다.
+
 `../../references/workflow.md`와 `../../references/library.md`를 읽는다. 제품 테스트를 실행하지 않는다.
 
 1. 요청에서 제품·프로젝트·시험 목적·변경 범위·버전·제외 범위를 파악한다. 결정에 필요한 값만 질문하며 나머지는 관련 Jira·Confluence에서 확인한다. 일정·담당자가 없다고 TC 선정을 중단하지 않는다. 미정 일정이나 시간을 임의로 확정하지 않는다.
