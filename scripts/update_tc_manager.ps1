@@ -1,6 +1,7 @@
-﻿param([switch]$CheckOnly)
+﻿param([switch]$CheckOnly, [switch]$Offline, [switch]$Remote)
 $tcUpdateArguments = @{} + $PSBoundParameters
 . (Join-Path $PSScriptRoot 'install_tc_manager.ps1')
+. (Join-Path $PSScriptRoot 'update_tc_manager_remote.ps1')
 
 function Invoke-TcUpdateCli([string]$Claude, [string[]]$Arguments) {
     $tcOutput = & $Claude @Arguments
@@ -10,6 +11,8 @@ function Invoke-TcUpdateCli([string]$Claude, [string[]]$Arguments) {
 
 function Test-TcSamePath([string]$Left, [string]$Right) {
     if (-not $Left -or -not $Right) { return $false }
+    if (Test-Path -LiteralPath $Left) { $Left = (Get-Item -LiteralPath $Left -Force).FullName }
+    if (Test-Path -LiteralPath $Right) { $Right = (Get-Item -LiteralPath $Right -Force).FullName }
     return [IO.Path]::GetFullPath($Left).TrimEnd('\', '/').Equals([IO.Path]::GetFullPath($Right).TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)
 }
 
@@ -27,11 +30,20 @@ function Get-TcUpdateInstallation([string]$Claude, [string]$Root) {
 }
 
 function Invoke-TcUpdate {
-    param([switch]$CheckOnly)
+    param([switch]$CheckOnly, [switch]$Offline, [switch]$Remote)
+    if ($Offline -and $Remote) { throw '[UPDATE_MODE] -Offline과 -Remote는 함께 사용할 수 없습니다.' }
+    if (-not $Offline -and -not $Remote -and -not $CheckOnly) {
+        Write-Host '1. ZIP 업데이트 (기본): 새 ZIP 내용을 현재 폴더에 덮어쓴 뒤 적용'
+        Write-Host '2. 원격 연결·자동 업데이트: 설정된 Git 저장소에서 설치/갱신'
+        $tcChoice = Read-Host '업데이트 방식 선택 [1/2, Enter=1]'
+        if ($tcChoice -eq '2') { $Remote = $true }
+        elseif ($tcChoice -ne '' -and $tcChoice -ne '1') { throw '[UPDATE_MODE] 1 또는 2를 선택하세요. 설정은 변경하지 않았습니다.' }
+    }
+    if ($Remote) { Invoke-TcRemoteUpdate -CheckOnly:$CheckOnly; return }
     $tcRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
     Initialize-TcPrerequisites -CheckOnly
     $tcClaude = Resolve-TcClaude ''
-    $tcPlugin = Join-Path $tcRoot 'plugins/tc-manager'
+    $tcPlugin = (Get-Item -LiteralPath (Join-Path $tcRoot 'plugins/tc-manager')).FullName
     $null = Invoke-TcUpdateCli $tcClaude @('plugin', 'validate', $tcPlugin, '--strict', '--json')
     $tcVersion = (Get-Content -LiteralPath (Join-Path $tcPlugin '.claude-plugin/plugin.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version
     Push-Location -LiteralPath $tcRoot
@@ -40,7 +52,8 @@ function Invoke-TcUpdate {
         if ([version]$tcVersion -lt [version]$tcBefore.version) { throw 'The copied package is older than the installed version. Downgrade was not performed.' }
         $tcMarkets = Invoke-TcUpdateCli $tcClaude @('plugin', 'marketplace', 'list', '--json') | ConvertFrom-Json
         $tcMarket = @($tcMarkets | Where-Object { $_.name -eq 'tc-manager-team' })
-        if ($tcMarket.Count -ne 1 -or $tcMarket[0].source -ne 'directory' -or -not (Test-TcSamePath $tcMarket[0].path $tcRoot)) {
+        $tcFromRemote = $tcMarket.Count -eq 1 -and ($tcMarket[0].source -in @('git', 'github')) -and (Test-Path -LiteralPath (Join-Path $tcRoot 'update-source.json')) -and (Test-TcRemoteMarket $tcMarket[0] (Get-TcRemoteSource $tcRoot))
+        if ($tcMarket.Count -ne 1 -or (-not $tcFromRemote -and ($tcMarket[0].source -ne 'directory' -or -not (Test-TcSamePath $tcMarket[0].path $tcRoot)))) {
             throw 'The team marketplace points to a different folder. Copy the new contents into the original installed folder; no marketplace was redirected.'
         }
         $tcProtected = @{}
@@ -75,6 +88,15 @@ function Invoke-TcUpdate {
         }
         Write-TcJson (Join-Path $tcBackup 'update.json') ([pscustomobject]@{previous_version=$tcBefore.version; target_version=$tcVersion; previous_install_path=$tcBefore.installPath})
         Write-Host ('Settings backup: ' + $tcBackup)
+        if ($tcFromRemote) {
+            $tcProfile = if ($env:CLAUDE_CONFIG_DIR) { [IO.Path]::GetFullPath($env:CLAUDE_CONFIG_DIR) } else { Join-Path $env:USERPROFILE '.claude' }
+            $tcKnown = Join-Path $tcProfile 'plugins/known_marketplaces.json'
+            Copy-Item -LiteralPath $tcKnown -Destination (Join-Path $tcBackup 'known-marketplaces.json')
+            $null = Invoke-TcUpdateCli $tcClaude @('plugin', 'marketplace', 'add', $tcRoot, '--scope', 'local')
+            Set-TcMarketplaceAutoUpdate (Join-Path $tcRoot '.claude/settings.local.json') $tcRoot $false -LocalDirectory
+            Set-TcMarketplaceAutoUpdate $tcKnown $tcRoot $false -KnownMarketplaces -LocalDirectory
+            Write-Host 'ZIP 업데이트 방식으로 전환했습니다. 원격 자동 업데이트는 껐으며 이 폴더의 배포본을 사용합니다.'
+        }
         $null = Invoke-TcUpdateCli $tcClaude @('plugin', 'marketplace', 'update', 'tc-manager-team')
         $null = Invoke-TcUpdateCli $tcClaude @('plugin', 'update', 'tc-manager@tc-manager-team', '--scope', 'local', '--json')
         $tcAfter = Get-TcUpdateInstallation $tcClaude $tcRoot
