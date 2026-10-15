@@ -33,7 +33,7 @@ function Invoke-TcUpdate {
     param([switch]$CheckOnly, [switch]$Offline, [switch]$Remote)
     if ($Offline -and $Remote) { throw '[UPDATE_MODE] -Offline과 -Remote는 함께 사용할 수 없습니다.' }
     if (-not $Offline -and -not $Remote -and -not $CheckOnly) {
-        Write-Host '1. ZIP 업데이트 (기본): 새 ZIP 내용을 현재 폴더에 덮어쓴 뒤 적용'
+        Write-Host '1. ZIP 업데이트 (기본): 새 ZIP 적용, 기존 원격 연결은 유지'
         Write-Host '2. 원격 연결·자동 업데이트: 설정된 Git 저장소에서 설치/갱신'
         $tcChoice = Read-Host '업데이트 방식 선택 [1/2, Enter=1]'
         if ($tcChoice -eq '2') { $Remote = $true }
@@ -93,12 +93,23 @@ function Invoke-TcUpdate {
             $tcProfile = if ($env:CLAUDE_CONFIG_DIR) { [IO.Path]::GetFullPath($env:CLAUDE_CONFIG_DIR) } else { Join-Path $env:USERPROFILE '.claude' }
             $tcKnown = Join-Path $tcProfile 'plugins/known_marketplaces.json'
             Copy-Item -LiteralPath $tcKnown -Destination (Join-Path $tcBackup 'known-marketplaces.json')
-            $null = Invoke-TcUpdateCli $tcClaude @('plugin', 'marketplace', 'add', $tcRoot, '--scope', 'local')
-            Set-TcMarketplaceAutoUpdate (Join-Path $tcRoot '.claude/settings.local.json') $tcRoot $false -LocalDirectory
-            Set-TcMarketplaceAutoUpdate $tcKnown $tcRoot $false -KnownMarketplaces -LocalDirectory
-            Write-Host 'ZIP 업데이트 방식으로 전환했습니다. 원격 자동 업데이트는 껐으며 이 폴더의 배포본을 사용합니다.'
+            Write-Host '기존 Git 원격 연결과 자동 업데이트 설정을 유지합니다. 플러그인은 기존 원격에서 갱신합니다.'
         }
         $null = Invoke-TcUpdateCli $tcClaude @('plugin', 'marketplace', 'update', 'tc-manager-team')
+        if ($tcFromRemote) {
+            $tcMarkets = Invoke-TcUpdateCli $tcClaude @('plugin', 'marketplace', 'list', '--json') | ConvertFrom-Json
+            $tcMarket = @($tcMarkets | Where-Object { $_.name -eq 'tc-manager-team' })
+            if ($tcMarket.Count -ne 1 -or -not (Test-TcRemoteMarket $tcMarket[0] (Get-TcRemoteSource $tcRoot))) {
+                throw '[SOURCE_CHANGED] 갱신 중 원격 출처가 변경되었습니다. 로컬 ZIP으로 전환하지 않습니다.'
+            }
+            $tcPlugin = (Get-Item -LiteralPath (Join-Path $tcMarket[0].installLocation 'plugins/tc-manager')).FullName
+            $tcRemoteManifest = Get-Content -LiteralPath (Join-Path $tcPlugin '.claude-plugin/plugin.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($tcRemoteManifest.name -ne 'tc-manager' -or [version]$tcRemoteManifest.version -lt [version]$tcVersion) {
+                throw '[REMOTE_VERSION_OLD] 원격 버전이 ZIP보다 오래되었습니다. 원격 연결은 유지합니다. 배포자가 Git을 갱신한 뒤 다시 실행하세요.'
+            }
+            $tcVersion = $tcRemoteManifest.version
+            $tcAliasSource = Join-Path $tcPlugin 'references/short-command/SKILL.md'
+        }
         $null = Invoke-TcUpdateCli $tcClaude @('plugin', 'update', 'tc-manager@tc-manager-team', '--scope', 'local', '--json')
         $tcAfter = Get-TcUpdateInstallation $tcClaude $tcRoot
         if ($tcAfter.version -ne $tcVersion) { throw 'Installed version does not match the copied package. Update is incomplete; rerun after checking Claude plugin status.' }

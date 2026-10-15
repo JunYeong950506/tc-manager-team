@@ -191,8 +191,17 @@ function Invoke-TcInstall {
     }
     Push-Location -LiteralPath $tcRoot
     try {
-        & $tcClaude plugin marketplace add $tcRoot --scope local
-        if ($LASTEXITCODE -ne 0) { throw '[MARKETPLACE_FAILED] 마켓플레이스 등록 실패. 기존 항목을 자동 교체하지 않았습니다.' }
+        $tcMarketsJson = & $tcClaude plugin marketplace list --json
+        if ($LASTEXITCODE -ne 0) { throw '[MARKETPLACE_FAILED] 기존 마켓플레이스를 확인하지 못했습니다. 출처는 변경하지 않았습니다.' }
+        $tcMarkets = ($tcMarketsJson -join "`n") | ConvertFrom-Json
+        $tcMarket = @($tcMarkets | Where-Object { $_.name -eq 'tc-manager-team' })
+        if ($tcMarket.Count -gt 1) { throw '[MARKETPLACE_CONFLICT] 같은 이름의 마켓플레이스가 중복됩니다. 출처는 변경하지 않았습니다.' }
+        if ($tcMarket.Count -eq 1 -and $tcMarket[0].source -in @('git', 'github')) {
+            Write-Host '기존 Git 원격 연결과 자동 업데이트 설정을 유지합니다.'
+        } else {
+            & $tcClaude plugin marketplace add $tcRoot --scope local
+            if ($LASTEXITCODE -ne 0) { throw '[MARKETPLACE_FAILED] 마켓플레이스 등록 실패. 기존 항목을 자동 교체하지 않았습니다.' }
+        }
         & $tcClaude plugin install 'tc-manager@tc-manager-team' --scope local --json
         if ($LASTEXITCODE -ne 0) { throw '[PLUGIN_INSTALL_FAILED] 플러그인 설치 실패. 위 Claude CLI 출력을 확인하세요.' }
         Save-TcWorkspaceConfiguration $tcWorkspace
