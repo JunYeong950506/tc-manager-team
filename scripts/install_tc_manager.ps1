@@ -98,7 +98,7 @@ function Initialize-TcPrerequisites([switch]$CheckOnly) {
     }
     $tcRemaining = @(Get-TcMissingPrerequisites)
     if ($tcRemaining.Count -gt 0) {
-        throw ('아직 사용할 수 없는 프로그램: ' + (($tcRemaining | ForEach-Object { $_.Name }) -join ', ') + '. 이 창을 닫고 Install-TC-Manager.cmd를 다시 실행하세요. 계속 실패하면 IT 담당자에게 설치/PATH를 확인받으세요. 플러그인 설정은 시작하지 않았습니다.')
+        throw ('아직 사용할 수 없는 프로그램: ' + (($tcRemaining | ForEach-Object { $_.Name }) -join ', ') + '. 이 창을 닫고 1-Install-TC-Manager.cmd를 다시 실행하세요. 계속 실패하면 IT 담당자에게 설치/PATH를 확인받으세요. 플러그인 설정은 시작하지 않았습니다.')
     }
     Write-Host '필수 프로그램 설치·검증 완료.' -ForegroundColor Green
 }
@@ -201,7 +201,7 @@ function Invoke-TcInstall {
             $null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $tcAliasPath)
             Copy-Item -LiteralPath $tcAliasSource -Destination $tcAliasPath
         }
-        Write-Host '설치 완료. Connect-Zephyr.cmd를 실행한 뒤 Claude Code에서 이 폴더로 새 세션을 시작하세요.' -ForegroundColor Green
+        Write-Host '설치 완료. 2-Connect-Zephyr.cmd를 실행한 뒤 Claude Code에서 이 폴더로 새 세션을 시작하세요.' -ForegroundColor Green
         Write-Host 'Jira/Confluence는 Claude에서 별도로 연결해야 합니다. 기존 TC 데이터는 보존하며, 새 작업 폴더의 DB에는 아직 TC가 없습니다.'
         Write-Host '새 Claude 세션에서 회사 계정으로 로그인하세요. 설치기가 대신 로그인하지 않습니다.'
     } finally { Pop-Location }

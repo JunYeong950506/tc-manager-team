@@ -66,7 +66,7 @@ function Invoke-TcRemoteUpdate {
         if (Test-Path -LiteralPath $tcPath) { $tcProtected[$tcName] = Get-TcFileDigest $tcPath }
     }
     if (-not $tcProtected.ContainsKey('.tc-manager/target.json') -or -not $tcProtected.ContainsKey('.tc-manager/library.json')) {
-        throw '[SETUP_REQUIRED] 최초에는 Install-TC-Manager.cmd를 먼저 실행하세요. Zephyr 연결은 Connect-Zephyr.cmd에서 설정합니다.'
+        throw '[SETUP_REQUIRED] 최초에는 1-Install-TC-Manager.cmd를 먼저 실행하세요. Zephyr 연결은 2-Connect-Zephyr.cmd에서 설정합니다.'
     }
     Push-Location -LiteralPath $tcRoot
     try {

@@ -10,6 +10,8 @@
 
 이 명령은 구조 검사와 `report.md`, `create.json`, `steps.json`, `import-as-new.xml`, `state.json`을 만든다. 초안만 요청하면 여기서 결과를 보여준다. blockers가 있으면 보고서만 남기고 등록 payload를 만들지 않는다. 코드 검사는 내용의 진실성이나 실제 수행 가능성을 보증하지 않는다.
 
+1.5.9부터 새로 만드는 TC의 Labels에는 `ai_agent`를 기본 추가한다. 사용자가 지정하거나 신규 초안으로 가져온 라벨은 `draft.json`의 선택 항목 `labels` 문자열 배열에 보존한다. prepare는 이 배열과 `ai_agent`를 중복 없이 합쳐 MCP용 create.json과 XML에 넣고, state.json의 required_labels로 재조회 기준을 저장한다. 라벨을 `ai_agent` 하나로 대체하지 않는다. 기존 TC의 조회·재사용·수정에는 이 규칙을 소급 적용하지 않고, 이전 버전에서 이미 생성한 TC의 작업 재개에도 자동 추가하지 않는다.
+
 Precondition의 구역 제목과 각 항목은 별도 줄, 구역 사이는 빈 줄이어야 한다. 형식 오류가 나오면 초안의 줄 구분을 고쳐 다시 prepare한다. create.json의 objective/precondition은 HTML 줄바꿈을 포함한 전송용 값이다. MCP 호출 시 draft.json의 평문이나 plain() 결과로 바꾸지 않고 그대로 전달한다. verify의 `objective.layout`/`precondition.layout` 불일치는 줄 구분 유실이므로 같은 TC에서 수정·재조회하며 신규 생성하지 않는다.
 
 ## MCP로 신규 등록 — 기본
@@ -19,7 +21,7 @@ Precondition의 구역 제목과 각 항목은 별도 줄, 구역 사이는 빈 
 1. `zephyr-mcp-contract.md`와 현재 세션 도구 스키마를 확인한다. 프로젝트·폴더 기본값이 있으면 먼저 그 대상을 확인하고 전체 프로젝트를 다시 탐색하지 않는다. 폴더 조회는 프로젝트·타입으로 필터링한다. 대상 폴더의 TC 목록을 끝까지 확인해 같은 제목이 이미 있으면 현재 작업의 저장된 key·내용과 대조한다. 기존 TC를 자동 갱신하지 않는다.
 2. `state.json`이 prepared일 때 `tc_draft.py pending <prepared>`로 생성 시도 전 기록한다. `create.json`을 실제 Create Test Case 도구에 전달한다. 응답을 `created-response.json`에 그대로 보존하고 `tc_draft.py created <prepared> --response created-response.json`으로 반환 key를 기록한다. **생성 응답을 잃었거나 pending 상태로 재개되면 Create를 반복하지 않는다.** 폴더에서 제목/생성 시각/본문을 찾아 실제 생성 여부부터 확인한다. 확정 못 하면 재시도하지 말고 남긴다.
 3. 새로 반환된 key로 TC와 전체 현재 단계를 조회한다. 폴더가 대상과 일치하고 자동 생성된 빈 단계뿐인지 확인한다. 새 TC이므로 비었다고 가정해 APPEND하지 않는다. 내용이 있는 다른 단계·첨부가 있으면 덮어쓰지 않는다. `zephyr-mcp-contract.md`에 따라 최종 검토에서 전체 Script와 OVERWRITE 선택을 함께 확인하고, 이 작업에서 생성한 TC에 `steps.json`의 items와 `mode=OVERWRITE`, 실제 반환 key를 전달한다. 같은 대상·본문·mode의 기존 선택은 반복 확인하지 않는다. Create Test Script(plain/BDD)가 아니다. 기존 TC의 첨부 목록을 일괄 수집하는 구 절차는 신규 작성의 필수 조건이 아니다.
-4. TC 상세와 전체 단계(모든 페이지)를 다시 조회해 `readback-metadata.json`, `readback-steps.json`으로 저장한다. `tc_draft.py verify <prepared> --metadata <파일> --steps <파일>`로 제목·Objective·Precondition·폴더·단계 수·Step/Test Data/Expected Result 전체를 비교한다. 차이가 없을 때만 등록 완료로 보고한다. API 응답 wrapper가 있으면 원응답도 보존하고 실제 데이터 객체/페이지를 파일로 분리한다.
+4. TC 상세와 전체 단계(모든 페이지)를 다시 조회해 `readback-metadata.json`, `readback-steps.json`으로 저장한다. `tc_draft.py verify <prepared> --metadata <파일> --steps <파일>`로 제목·Objective·Precondition·폴더·단계 수·Step/Test Data/Expected Result 전체와 required_labels의 포함 여부를 비교한다. 차이가 없을 때만 등록 완료로 보고한다. API 응답 wrapper가 있으면 원응답도 보존하고 실제 데이터 객체/페이지를 파일로 분리한다. labels 누락이면 이 작업에서 새로 생성한 같은 TC의 최신 라벨에 required_labels를 중복 없이 합쳐 수정·재조회한다. 추가로 확인된 원격 라벨은 삭제하지 않으며 TC를 다시 생성하지 않는다.
 5. API 토큰 인증 오류면 실제 만료·폐기·권한·프로세스 환경을 구분한다. 30분 OAuth 재인증으로 되돌리지 않는다. 파일과 실제 key를 유지하고 연결 후 같은 TC의 남은 단계부터 진행한다. 5xx/응답 유실은 쓰기 성공 여부를 재조회한 후 판단한다. 새 TC를 반복 생성하거나 scope를 넓히지 않는다. 단계 쓰기가 실패하면 `state.json`의 created와 실제 key를 보고한다. 생성 key에 대해 내용이 이미 일치하면 다시 쓰지 않고 verify한다. 빈 단계 등으로 수가 다르면 mismatch를 그대로 보존하며 등록 완료로 표시하지 않는다.
 
 ## 파일 가져오기 — 대안
@@ -30,7 +32,7 @@ Zephyr의 대상 프로젝트·폴더에서 More → Import from file → Zephyr
 
 ## 결과
 
-원본 Jira 요구사항이 있는 등록 작업은 `story-traceability.md`로 원본 Issue Link를 생성하고 재조회한다. 본문·단계 검증과 링크 검증을 모두 통과해야 전체 완료다. 링크만 실패하면 이미 생성된 TC key와 남은 연결을 보고하며 TC를 다시 만들지 않는다.
+원본 Jira 요구사항이 있는 등록 작업은 `story-traceability.md`로 원본 Issue Link를 생성하고 재조회한다. 제목의 대괄호에 있는 Jira 티켓 키도 실제 원문으로 확인하여 연결 대상에 포함하고, Traceability의 Coverage에 해당 키가 모두 있는지 확인한다. 본문·단계 검증과 링크 검증을 모두 통과해야 전체 완료다. 링크만 실패하면 이미 생성된 TC key와 남은 연결을 보고하며 TC를 다시 만들지 않는다.
 
 XML 가져오기 후 MCP 재조회도 불가능하면 Zephyr UI에서 **생성된 그 TC만 선택해 Export to XML**로 다시 내보낸다. 원래 가져오기 파일을 재조회 근거로 쓰지 않는다. `tc_draft.py verify-xml <prepared> --export <실제내보내기.xml> --folder-path <UI에서확인한전체폴더경로>`로 원격 key·전체 폴더 경로·제목·본문·모든 단계의 일치를 확인한다. 이 방법은 XML 내보내기 대조이며 API 재조회로 표시하지 않는다. 성공 화면·실제 key·폴더 URL도 함께 보존한다.
 

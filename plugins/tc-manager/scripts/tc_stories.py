@@ -5,12 +5,15 @@ import re
 from urllib.parse import urlsplit
 
 import tc_registry as registry
+import tc_source_catalog as catalog
+import tc_story_sources as source_views
 
 WRITE_OPS = {"stories.import", "stories.links.record"}
 OPERATIONS = {
-    "stories.import": ({"namespace", "stories", "scope"}, set()),
+    "stories.import": ({"namespace", "stories", "scope"}, {"source_records"}),
     "stories.search": ({"namespace"}, {"q", "limit", "offset", "unlinked"}),
-    "stories.get": ({"namespace", "key"}, set()),
+    "stories.lookup": ({"namespace", "q"}, {"limit", "offset", "team", "inventory", "scope"}),
+    "stories.get": ({"namespace", "key"}, {"include_history", "include_source"}),
     "stories.for-case": ({"namespace", "tc_id"}, {"version"}),
     "stories.links.plan": ({"namespace", "tc_id", "version", "expected_keys", "links"}, set()),
     "stories.links.record": ({"namespace", "tc_id", "version", "content_hash", "observed_at", "links", "complete"}, {"expected_keys"}),
@@ -44,7 +47,7 @@ def issue_key(value):
 
 def snapshot(row):
     required = {"key", "issue_id", "issue_type", "title", "description", "acceptance_criteria", "updated_at", "fetched_at", "source_url"}
-    if not isinstance(row, dict) or set(row) != required:
+    if not isinstance(row, dict) or not required <= set(row) or set(row) - required - {"content_status"}:
         raise ValueError("Story snapshot 필드: " + ", ".join(sorted(required)))
     row = dict(row)
     issue_key(row["key"])
@@ -52,6 +55,14 @@ def snapshot(row):
         raise ValueError("실제 Jira issue_id 문자열이 필요합니다")
     for field in ("title", "issue_type", "description", "acceptance_criteria"):
         text(row[field], field, empty=field in {"description", "acceptance_criteria"})
+    if "content_status" in row:
+        status = row["content_status"]
+        if (not isinstance(status, dict) or set(status) != {"description", "acceptance_criteria"}
+                or status["description"] not in {"present", "empty"}
+                or status["acceptance_criteria"] not in {"present", "not_identified"}
+                or (status["description"] == "present") != bool(row["description"].strip())
+                or (status["acceptance_criteria"] == "present") != bool(row["acceptance_criteria"].strip())):
+            raise ValueError("본문/AC의 내용 상태가 실제 내용과 다릅니다")
     url = urlsplit(text(row["source_url"], "source_url"))
     if url.scheme != "https" or not url.hostname or url.username or url.password or url.query or url.fragment or url.path != "/browse/" + row["key"]:
         raise ValueError("실제 Jira 이슈의 HTTPS browse 주소가 필요합니다")
@@ -61,7 +72,7 @@ def snapshot(row):
     return row
 
 
-def import_stories(db, namespace, rows, scope, actor):
+def import_stories(db, namespace, rows, scope, actor, source_records=None):
     if not isinstance(rows, list) or len(rows) > 1000:
         raise ValueError("한 번에 1000개 이하 Story 배열이 필요합니다")
     if not isinstance(scope, dict) or set(scope) != {"query", "observed_at", "complete"} or type(scope["complete"]) is not bool:
@@ -70,12 +81,17 @@ def import_stories(db, namespace, rows, scope, actor):
     rows = [snapshot(row) for row in rows]
     if len({row["key"] for row in rows}) != len(rows) or len({row["issue_id"] for row in rows}) != len(rows):
         raise ValueError("한 수집 묶음에 같은 Story가 중복되었습니다")
+    if source_records is not None:
+        for statement in source_views.DDL:
+            db.execute(statement)
+        return source_views.store(db, namespace, rows, source_records, scope, actor, current_stories(db, namespace))
     inserted = 0
+    known_ids = {row["issue_id"]: row["key"] for row in current_stories(db, namespace).values()}
     for row in rows:
-        for known in current_stories(db, namespace).values():
-            if known["issue_id"] == row["issue_id"] and known["key"] != row["key"]:
-                raise ValueError("같은 Jira ID에 다른 Story 키가 있습니다")
-        content = {k: v for k, v in row.items() if k != "fetched_at"}
+        if row["issue_id"] in known_ids and known_ids[row["issue_id"]] != row["key"]:
+            raise ValueError("같은 Jira ID에 다른 Story 키가 있습니다")
+        known_ids[row["issue_id"]] = row["key"]
+        content = {k: v for k, v in row.items() if k not in {"fetched_at", "content_status"}}
         digest = registry.digest(content)
         old = db.execute("SELECT content_hash FROM story_snapshots WHERE namespace=? AND issue_key=? AND updated_at=?", (namespace, row["key"], row["updated_at"])).fetchone()
         if old and old[0] != digest:
@@ -85,7 +101,8 @@ def import_stories(db, namespace, rows, scope, actor):
             previous = json.loads(identity[0])
             if previous["issue_id"] != row["issue_id"] or previous["source_url"] != row["source_url"]:
                 raise ValueError("같은 namespace의 Story ID/사이트가 바뀌었습니다")
-        inserted += db.execute("INSERT OR IGNORE INTO story_snapshots VALUES (?,?,?,?,?,?,?)", (namespace, row["key"], digest, row["updated_at"], registry.canonical(row), actor, row["fetched_at"])).rowcount
+        if not old:
+            inserted += db.execute("INSERT OR IGNORE INTO story_snapshots VALUES (?,?,?,?,?,?,?)", (namespace, row["key"], digest, row["updated_at"], registry.storage.pack(db, registry.canonical(row)), actor, row["fetched_at"])).rowcount
         newest = db.execute("SELECT content_hash FROM story_snapshots WHERE namespace=? AND issue_key=? ORDER BY updated_at DESC LIMIT 1", (namespace, row["key"])).fetchone()[0]
         db.execute("INSERT INTO story_heads VALUES (?,?,?) ON CONFLICT(namespace,issue_key) DO UPDATE SET content_hash=excluded.content_hash", (namespace, row["key"], newest))
     keys = [row["key"] for row in rows]
@@ -95,8 +112,29 @@ def import_stories(db, namespace, rows, scope, actor):
 
 
 def current_stories(db, namespace):
-    return {row["issue_key"]: dict(json.loads(row["raw_json"]), content_hash=row["content_hash"]) for row in db.execute(
-        "SELECT s.* FROM story_heads h JOIN story_snapshots s USING(namespace,issue_key,content_hash) WHERE h.namespace=?", (namespace,))}
+    result = {}
+    if db.execute("SELECT 1 FROM sqlite_master WHERE name='story_snapshots'").fetchone():
+        result = {row["issue_key"]: dict(json.loads(row["raw_json"]), content_hash=row["content_hash"]) for row in db.execute(
+            "SELECT s.* FROM story_heads h JOIN story_snapshots s USING(namespace,issue_key,content_hash) WHERE h.namespace=?", (namespace,))}
+    for key, row in source_views.current(db, namespace).items():
+        if key not in result or (row['updated_at'], row['fetched_at']) >= (result[key]['updated_at'], result[key]['fetched_at']):
+            result[key] = row
+    return result
+
+
+def content_view(story):
+    result = {key: story[key] for key in ("key", "issue_type", "title", "description", "acceptance_criteria", "source_url")}
+    result["project"] = story["key"].rsplit("-", 1)[0]
+    result["content_status"] = story.get("content_status", dict(
+        description="present" if story["description"].strip() else "empty",
+        acceptance_criteria="present" if story["acceptance_criteria"].strip() else "not_identified"))
+    if 'source_hash' in story:
+        result['source_hash'] = story['source_hash']
+        result['text_extraction'] = dict(status='partial' if story['parsing_warnings'] else 'complete',
+            warnings=story['parsing_warnings'], extractor=story['extractor'], raw_source_preserved=True)
+    if story.get('pending_source_reviews'):
+        result['pending_source_reviews'] = story['pending_source_reviews']
+    return result
 
 
 def issue_links(value):
@@ -154,6 +192,18 @@ def record_links(db, namespace, args, actor):
 
 
 def case_links(db, namespace, tc_id, version=None):
+    if version is None:
+        source_links = catalog.case_stories(db, namespace, tc_id)
+        if source_links is not None:
+            found, unresolved = [], []
+            for link in source_links:
+                story = current_stories(db, link['namespace']).get(link['key'])
+                if story:
+                    found.append(dict(story=content_view(story), relation='ISSUE_LINK'))
+                else:
+                    unresolved.append(link)
+            return dict(tc_id=tc_id, status='source_catalog', stories=found, unresolved_links=unresolved, source_status=catalog.status(db, namespace),
+                limitation='최근 완료된 원본 조회의 연결입니다. TC 단계의 요구사항 충족 여부는 별도 검토합니다.')
     tc = registry.select_case(db, namespace, tc_id, version)
     row = db.execute("SELECT * FROM story_link_reads WHERE namespace=? AND tc_id=? AND version=? ORDER BY observed_at DESC LIMIT 1", (namespace, tc_id, tc["version"])).fetchone()
     if not row:
@@ -162,7 +212,7 @@ def case_links(db, namespace, tc_id, version=None):
     by_id = {story["issue_id"]: story for story in stories.values()}
     links = json.loads(row["payload_json"])["links"]
     return dict(tc_id=tc_id, version=tc["version"], status="observed", observed_at=row["observed_at"],
-                stories=[dict(story=by_id[link["issue_id"]], relation=link["type"]) for link in links if link["issue_id"] in by_id],
+                stories=[dict(story=content_view(by_id[link["issue_id"]]), relation=link["type"]) for link in links if link["issue_id"] in by_id],
                 unresolved_links=[link for link in links if link["issue_id"] not in by_id],
                 limitation="클라이언트가 제출한 조회 시점의 연결입니다. 현재 Zephyr 상태/요구사항 충족을 보증하지 않습니다.")
 
@@ -182,7 +232,11 @@ def case_index(db, namespace):
     return result
 
 
-def related_cases(index, story):
+def related_cases(index, story, db=None, namespace=None):
+    if db is not None:
+        current = catalog.story_cases(db, namespace, story['key'])
+        if current is not None:
+            return current
     return [dict(case, requirements_changed=case["observed_at"] < story["updated_at"]) for case in index.get(story["issue_id"], [])]
 
 
@@ -198,7 +252,7 @@ def execute(db, namespace, op, args, actor="local-user"):
     elif not db.execute("SELECT 1 FROM sqlite_master WHERE name='story_snapshots'").fetchone():
         return dict(status="unavailable", reason="Story 미수집", items=[])
     if op == "stories.import":
-        return import_stories(db, namespace, args["stories"], args["scope"], actor)
+        return import_stories(db, namespace, args["stories"], args["scope"], actor, args.get('source_records'))
     if op == "stories.links.record":
         return record_links(db, namespace, args, actor)
     if op == "stories.links.plan":
@@ -207,12 +261,25 @@ def execute(db, namespace, op, args, actor="local-user"):
         return case_links(db, namespace, args["tc_id"], args.get("version"))
     stories = current_stories(db, namespace)
     index = case_index(db, namespace)
+    if op == "stories.lookup":
+        found = execute(db, namespace, 'stories.search', {key: value for key, value in args.items() if key not in {'team', 'inventory', 'scope'}})
+        found['test_cases'] = catalog.search(db, namespace, args['q'], args.get('limit', 20), args.get('team', 'all'), args.get('inventory', 'all'), args.get('scope', 'all'))
+        return found
     if op == "stories.get":
+        if any(type(args.get(key, False)) is not bool for key in ('include_history', 'include_source')):
+            raise ValueError("include_history/include_source는 boolean이어야 합니다")
         key = issue_key(args["key"])
         if key not in stories:
             raise ValueError("수집되지 않은 Story입니다")
-        return dict(story=stories[key], cases=related_cases(index, stories[key]),
-            history=[dict(row) for row in db.execute("SELECT content_hash,updated_at FROM story_snapshots WHERE namespace=? AND issue_key=? ORDER BY updated_at DESC", (namespace, key))])
+        result = dict(story=content_view(stories[key]), cases=related_cases(index, stories[key], db, namespace), source_status=catalog.status(db, namespace))
+        if args.get("include_history"):
+            result["history"] = [dict(row) for row in db.execute("SELECT content_hash,updated_at FROM story_snapshots WHERE namespace=? AND issue_key=? ORDER BY updated_at DESC", (namespace, key))]
+            result['history'] += source_views.history(db, namespace, key)
+            result['history'].sort(key=lambda row: row['updated_at'], reverse=True)
+        if args.get('include_source'):
+            result['source'] = source_views.source(db, namespace, key, stories[key])
+            result['pending_sources'] = source_views.pending_reviews(db, namespace, key, include_raw=True)
+        return result
     limit, offset = args.get("limit", 20), args.get("offset", 0)
     if type(limit) is not int or not 1 <= limit <= 100 or type(offset) is not int or offset < 0 or type(args.get("unlinked", False)) is not bool:
         raise ValueError("limit/offset/unlinked 형식을 확인하세요")
@@ -222,14 +289,19 @@ def execute(db, namespace, op, args, actor="local-user"):
         raise ValueError("검색 가능한 단어가 필요합니다")
     items = []
     for story in sorted(stories.values(), key=lambda s: s["key"]):
-        matched = terms & registry.tokens(" ".join(story[k] for k in ("key", "title", "description", "acceptance_criteria")))
+        fields = {k: sorted(terms & registry.tokens(story[k])) for k in ("key", "title", "description", "acceptance_criteria")}
+        matched = set().union(*(set(value) for value in fields.values()))
         if terms and not matched:
             continue
-        cases = related_cases(index, story)
-        coverage = [case for case in cases if case["relation"] == "COVERAGE"]
+        cases = related_cases(index, story, db, namespace)
+        coverage = [case for case in cases if case["relation"] in {"COVERAGE", "ISSUE_LINK"}]
         if args.get("unlinked") and coverage:
             continue
-        items.append(dict(story=story, cases=cases, finding="observed_links" if coverage else "no_link_in_collected_data", matched_terms=sorted(matched)))
+        items.append(dict(story=content_view(story), cases=cases, finding="observed_links" if coverage else "no_link_in_collected_data",
+            matched_terms=sorted(matched), matched_fields={k: v for k, v in fields.items() if v},
+            score=round(len(matched) / len(terms), 6) if terms else 0))
+    items.sort(key=lambda item: (-item["score"], item["story"]["key"]))
     return dict(status="searched", total=len(items), items=items[offset:offset + limit], offset=offset,
+        source_status=catalog.status(db, namespace),
         collections=[dict(scope=json.loads(row[0]), keys=json.loads(row[1])) for row in db.execute("SELECT scope_json,keys_json FROM story_collections WHERE namespace=? ORDER BY rowid DESC LIMIT 10", (namespace,))],
         limitation="수집된 Story와 TC 버전의 관측 연결만 검색합니다. 연결 미확인은 Jira/Zephyr 전체의 TC 부재나 테스트 커버리지 부족 확정이 아닙니다.")

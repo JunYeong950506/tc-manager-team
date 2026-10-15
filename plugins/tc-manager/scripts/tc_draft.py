@@ -113,6 +113,17 @@ def plain(value):
     return " ".join("".join(parser.parts).split())
 
 
+def creation_labels(draft):
+    labels = draft.get("labels", [])
+    if not isinstance(labels, list) or any(not isinstance(v, str) or not v.strip() for v in labels):
+        raise ValueError("labels에는 비어 있지 않은 문자열 배열이 필요합니다")
+    return list(dict.fromkeys([*labels, "ai_agent"]))
+
+
+def labels_match(actual, required):
+    return isinstance(actual, list) and all(label in actual for label in required)
+
+
 def validate(draft, target):
     for name in ("title", "objective", "precondition"):
         if not isinstance(draft.get(name), str) or not draft[name].strip():
@@ -153,18 +164,20 @@ def report(draft):
 
 def prepare(draft, target, output):
     validate(draft, target)
+    labels = creation_labels(draft)
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
     save(output / "draft.json", draft)
     save(output / "target.json", target)
     (output / "report.md").write_text(report(draft), encoding="utf-8")
     state = {"status": "blocked" if draft["blockers"] else "prepared", "draft_hash": digest(draft),
-             "target_hash": digest(target), "updated_at": stamp(), "remote_key": None}
+             "target_hash": digest(target), "updated_at": stamp(), "remote_key": None,
+             "required_labels": labels}
     save(output / "state.json", state)
     if draft["blockers"]:
         return state
     create = {"projectKey": target["project_key"], "folderId": target["folder_id"], "name": draft["title"],
-              "objective": rich(draft["objective"]), "precondition": rich(draft["precondition"])}
+              "objective": rich(draft["objective"]), "precondition": rich(draft["precondition"]), "labels": labels}
     steps = {"mode": "OVERWRITE", "items": [{"inline": {"description": rich(s["step"]),
               "testData": rich(s["test_data"]), "expectedResult": rich(s["expected_result"])}} for s in draft["steps"]]}
     save(output / "create.json", create)
@@ -175,6 +188,9 @@ def prepare(draft, target, output):
     case = ET.SubElement(ET.SubElement(project, "testCases"), "testCase")
     for key in ("name", "objective", "precondition"):
         ET.SubElement(case, key).text = create[key]
+    label_rows = ET.SubElement(case, "labels")
+    for label in labels:
+        ET.SubElement(label_rows, "label").text = label
     rows = ET.SubElement(ET.SubElement(case, "testScript", {"type": "steps"}), "steps")
     for i, item in enumerate(steps["items"]):
         row = ET.SubElement(rows, "step", {"index": str(i)})
@@ -241,6 +257,8 @@ def verify(folder, metadata, pages):
         raise ValueError("이 작업에서 생성한 TC의 실제 key가 필요합니다")
     steps = all_steps(pages)
     differences = []
+    if state.get("required_labels") and not labels_match(metadata.get("labels"), state["required_labels"]):
+        differences.append("labels")
     for remote, local in (("name", "title"), ("objective", "objective"), ("precondition", "precondition")):
         if plain(metadata.get(remote)) != " ".join(draft[local].split()):
             differences.append(remote)
@@ -279,6 +297,9 @@ def verify_xml(folder, exported, expected_folder_path):
         raise ValueError("내보내기에서 생성 key를 유일하게 찾을 수 없습니다")
     case = cases[0]
     differences = []
+    if state.get("required_labels") and not labels_match(
+            [label.text for label in case.findall("labels/label")], state["required_labels"]):
+        differences.append("labels")
     for remote, local in (("name", "title"), ("objective", "objective"), ("precondition", "precondition")):
         value = case.findtext(remote, "")
         if (" ".join(value.split()) if remote == "name" else plain(value)) != " ".join(draft[local].split()):

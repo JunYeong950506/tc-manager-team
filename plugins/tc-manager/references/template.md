@@ -8,6 +8,7 @@
 | Test Script / Step | 실행 입력 확인 → 구체적인 조작 → 관찰·증거 확보 → 다음 단계 진입 조건. 선행 결과에 따라 후속 동작이 달라지면 분기·중단·종료를 명시한다. UI 명칭을 사용하며 확인하지 않은 selector/AutomationId는 만들지 않는다. |
 | Test Script / Test Data | 해당 단계의 입력값·데이터 조건·계정 별칭·자원 참조. 비밀번호·토큰과 Pass/Fail 기준을 넣지 않는다. 불필요하면 빈 문자열. |
 | Test Script / Expected Result | 관찰 대상의 기대 상태와 비교 방법. 수치·시간 한계는 출처가 있을 때만 사용한다. 실패와 증거 부족을 구분한다. |
+| Labels | 신규 TC는 draft.json의 선택 항목 `labels`에 지정한 라벨을 보존하고 `ai_agent`를 자동 추가한다. 예: `["1.3_hotfix#2", "ai_agent"]`. 기존 TC 수정에는 자동 추가하지 않는다. |
 
 ## 사람용 시나리오와 실행용 Script
 

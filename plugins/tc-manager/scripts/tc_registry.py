@@ -12,9 +12,10 @@ import sys
 import unicodedata
 
 import qa_manage as qa
+import tc_storage as storage
 
 
-DB_VERSION = 1
+DB_VERSION = 2
 EXTRACTOR_VERSION = "explicit-labels-1"
 CATEGORIES = {"feature", "intent", "permission", "environment", "state", "client_type"}
 LABELS = {"기능": "feature", "대상 기능": "feature", "검증 목적": "intent",
@@ -77,7 +78,7 @@ def connect(path, create=False):
         if not path.is_file():
             raise ValueError(f"DB가 없습니다: {path}")
         db = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=10)
-    db.row_factory = sqlite3.Row
+    db.row_factory = storage.StoredRow
     db.execute("PRAGMA foreign_keys = ON")
     version = db.execute("PRAGMA user_version").fetchone()[0]
     if version == 0 and create:
@@ -87,7 +88,7 @@ def connect(path, create=False):
             if version == 0:
                 if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' LIMIT 1").fetchone():
                     raise ValueError("기존의 다른 DB에는 TC registry를 생성하지 않습니다")
-                for statement in DDL:
+                for statement in (storage.DDL, *DDL):
                     db.execute(statement)
                 db.execute(f"PRAGMA user_version = {DB_VERSION}")
                 version = DB_VERSION
@@ -98,7 +99,7 @@ def connect(path, create=False):
             raise
     if version != DB_VERSION:
         db.close()
-        raise ValueError(f"지원하지 않는 DB 버전: {version}; 지원 버전: {DB_VERSION}")
+        raise ValueError(f"지원하지 않는 DB 버전: {version}; 지원 버전: {DB_VERSION}. tc_compact.py --source 원본 --output 새파일 --report 검증.json으로 명시적으로 변환하세요")
     return db
 
 
@@ -233,21 +234,20 @@ def ingest_transaction(db, prepared):
         if existing and existing[0] != record[4]:
             raise ValueError(f"동일 TC ID/버전의 내용 또는 출처가 달라졌습니다: {record[:3]}; 새 버전이 필요합니다")
         inserted += existing is None
-    db.execute("INSERT OR IGNORE INTO bundles VALUES (?,?)", (bundle_hash, canonical(bundle)))
-    db.execute("INSERT OR IGNORE INTO bundle_inputs VALUES (?,?,?)", (input_hash, bundle_hash, raw_text))
+    db.execute("INSERT OR IGNORE INTO bundles VALUES (?,?)", (bundle_hash, storage.pack(db, canonical(bundle), "bundle")))
+    db.execute("INSERT OR IGNORE INTO bundle_inputs VALUES (?,?,?)", (input_hash, bundle_hash, storage.pack(db, raw_text, "bundle")))
     for source in bundle["sources"]:
         db.execute("INSERT OR IGNORE INTO sources VALUES (?,?,?,?)",
-                   (bundle_hash, source["id"], digest(source), canonical(source)))
+                   (bundle_hash, source["id"], digest(source), storage.pack(db, canonical(source))))
     for record in records:
-        db.execute("INSERT OR IGNORE INTO cases VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", record)
+        db.execute("INSERT OR IGNORE INTO cases VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", storage.encode_row(db, "cases", ("namespace", "tc_id", "version", "schema_version", "content_hash", "raw_json", "sources_json", "title", "objective", "precondition", "script_json", "script_hash", "conditions_hash"), record))
         db.execute("INSERT OR IGNORE INTO case_imports VALUES (?,?,?,?)", (*record[:3], bundle_hash))
-    before_facets = db.total_changes
+    facet_count = 0
     for facet in all_facets:
-        db.execute("INSERT OR IGNORE INTO facets VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        facet_count += db.execute("INSERT OR IGNORE INTO facets VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                    (namespace, facet["tc_id"], facet["tc_version"], digest(facet), facet["category"],
                     facet["value"], facet["status"], facet["field_path"], facet["quote"],
-                    facet["extractor"], facet["extractor_version"], canonical(facet)))
-    facet_count = db.total_changes - before_facets
+                    facet["extractor"], facet["extractor_version"], storage.pack(db, canonical(facet)))).rowcount
     return dict(bundle_hash=bundle_hash, input_hash=input_hash, inserted_versions=inserted,
                 unchanged_versions=len(records) - inserted, inserted_facets=facet_count,
                 current_selection_changed=False, classification_status="candidate",
@@ -338,6 +338,13 @@ def tokens(text):
         if re.search("[가-힣]", word):
             result.update(word[index:index + 2] for index in range(len(word) - 1))
     return result
+
+
+def matched_tokens(text, terms):
+    normalized = unicodedata.normalize('NFKC', text).casefold()
+    if not any(term in normalized for term in terms):
+        return set()
+    return terms & tokens(normalized)
 
 
 def differences(reference, candidate):

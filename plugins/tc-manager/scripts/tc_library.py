@@ -11,12 +11,15 @@ from urllib.parse import urlsplit
 import tc_registry as registry
 import tc_draft as draft_core
 import tc_stories as stories
+import tc_source_catalog as catalog
 from tc_shared import Remote
+from tc_outbox import operation_id
 
 
 def settings(path, site, project):
     path = Path(path).resolve()
     config = draft_core.load(path)
+    config['_outbox_dir'] = str(path.parent)
     parsed = urlsplit(site)
     if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in ("", "/"):
         raise ValueError("site에는 자격 증명 없는 HTTPS 사이트 주소가 필요합니다")
@@ -50,9 +53,15 @@ def settings(path, site, project):
     return db.resolve(), match[0]["namespace"]
 
 
-def search(db_path, namespace, query, limit=10):
+def search(db_path, namespace, query, limit=10, team='all', inventory='all', scope='all'):
+    catalog.validate_scope(team, inventory, scope)
     if isinstance(db_path, Remote):
-        return db_path.rpc("cases.list", dict(q=query, limit=limit, group_by_id=True))
+        source = db_path.rpc('catalog.search', dict(q=query, limit=limit, team=team, inventory=inventory, scope=scope))
+        result = db_path.rpc("cases.list", dict(q=query, limit=limit, group_by_id=True, exclude_catalog_seed=source.get('status') == 'searched', team=team, inventory=inventory, scope=scope))
+        result['source_catalog'] = source
+        result['source_status'] = source.get('source_status', source.get('status'))
+        result['limitation'] = '원본 검색 후보는 source_catalog.items를 함께 확인하세요. 검토 버전과 원본 최신 정보는 구분됩니다.'
+        return result
     if not 1 <= limit <= 100 or not registry.tokens(query):
         raise ValueError("검색어와 1~100 사이 limit가 필요합니다")
     if not Path(db_path).is_file():
@@ -60,17 +69,24 @@ def search(db_path, namespace, query, limit=10):
     terms = registry.tokens(query)
     grouped = {}
     with closing(registry.connect(db_path)) as db:
+        scopes = catalog.scope_map(db, namespace)
+        kpi = catalog.kpi_map(db, namespace) if scope == 'px-kpi' else {}
         rows = db.execute(
             "SELECT c.*, h.version AS selected_version FROM cases c LEFT JOIN current_cases h "
             "ON c.namespace=h.namespace AND c.tc_id=h.tc_id WHERE c.namespace=? "
             "AND (h.version IS NULL OR h.version=c.version)", (namespace,))
         for row in rows:
+            if scope == 'px-kpi' and kpi.get(row['tc_id'], {}).get('in_scope') is not True:
+                continue
+            classification = scopes.get(row['tc_id']) or catalog.stored_scope(row)
+            if not catalog.in_scope(classification, team, inventory):
+                continue
             fields = {name: sorted(terms & registry.tokens(row[name]))
                       for name in ("title", "objective", "precondition", "script_json")}
             matched = set(term for values in fields.values() for term in values)
             if not matched:
                 continue
-            item = grouped.setdefault(row["tc_id"], {"tc_id": row["tc_id"], "versions": [], "score": 0})
+            item = grouped.setdefault(row["tc_id"], {"tc_id": row["tc_id"], "versions": [], "score": 0, "team_scope": classification})
             score = len(matched) / len(terms)
             item["score"] = max(item["score"], score)
             item["versions"].append({"version": row["version"], "title_excerpt": row["title"][:100],
@@ -80,7 +96,7 @@ def search(db_path, namespace, query, limit=10):
     for item in candidates:
         item["score"] = round(item["score"], 6)
         item["versions"].sort(key=lambda row: row["version"])
-    return {"status": "searched", "namespace": namespace, "query": query,
+    return {"status": "searched", "namespace": namespace, "query": query, "team": team, "inventory": inventory,
         "inventory": registry.stats(db_path, namespace), "total_candidates": len(candidates),
         "candidates": candidates[:limit], "duplicate_decision": "not_performed",
         "remote_coverage": "unknown_until_scope_evidence_checked",
@@ -138,6 +154,7 @@ def select_verified(db_path, namespace, prepared, version, expected_version=None
     if state["status"] != "verified":
         raise ValueError("원격 재조회 verified 상태만 기준 버전으로 선택할 수 있습니다")
     key = state["remote_key"]
+    notification = db_path.notify(key, operation_id(key, str(folder.resolve()) + state['readback_hash'])) if isinstance(db_path, Remote) else None
     existing = (db_path.rpc("cases.get", dict(id=key, version=version)) if isinstance(db_path, Remote) else registry.show(db_path, namespace, key, version))["test_case"]
     if any(existing[name] != draft[name] for name in ("title", "objective", "precondition")):
         raise ValueError("DB 본문과 재조회 확인본이 다릅니다")
@@ -146,7 +163,9 @@ def select_verified(db_path, namespace, prepared, version, expected_version=None
     if script != [{k: step[k] for k in ("step", "test_data", "expected_result")} for step in draft["steps"]]:
         raise ValueError("DB 단계와 재조회 확인본이 다릅니다")
     if isinstance(db_path, Remote):
-        return db_path.rpc("cases.current", dict(id=key, version=version, expected_version=expected_version, reason="재조회 검증본 " + state["draft_hash"]))
+        result = db_path.rpc("cases.current", dict(id=key, version=version, expected_version=expected_version, reason="재조회 검증본 " + state["draft_hash"]))
+        result['source_sync'] = notification
+        return result
     return registry.set_current(db_path, namespace, key, version, expected_version=expected_version,
         actor="tc-manager/readback", reason="재조회 검증본 " + state["draft_hash"])
 
@@ -170,8 +189,22 @@ def main():
     p = commands.add_parser("search")
     p.add_argument("query")
     p.add_argument("--limit", type=int, default=10)
+    p.add_argument('--team', choices=catalog.TEAMS, default='all')
+    p.add_argument('--inventory', choices=catalog.INVENTORIES, default='all')
+    p.add_argument('--scope', choices=catalog.SCOPES, default='all')
+    commands.add_parser('team-stats')
     commands.add_parser("stats")
     commands.add_parser("connection")
+    p = commands.add_parser('notify-change')
+    p.add_argument('prepared', type=Path)
+    p.add_argument('--story-key', action='append', default=[])
+    p = commands.add_parser('sync-status')
+    p.add_argument('--event-id')
+    p = commands.add_parser('notify-source')
+    p.add_argument('--tc-key', required=True)
+    p.add_argument('--event-id', required=True)
+    p.add_argument('--readback', type=Path, required=True)
+    p.add_argument('--story-key', action='append', default=[])
     p = commands.add_parser("shared-rpc")
     p.add_argument("operation", choices=("readiness.get", "readiness.record", "cases.current", "cases.review"))
     p.add_argument("file", type=Path)
@@ -182,8 +215,16 @@ def main():
     p.add_argument("--unlinked", action="store_true")
     p.add_argument("--limit", type=int, default=20)
     p.add_argument("--offset", type=int, default=0)
+    p = commands.add_parser("lookup")
+    p.add_argument("query")
+    p.add_argument("--limit", type=int, default=20)
+    p.add_argument("--offset", type=int, default=0)
+    p.add_argument('--team', choices=catalog.TEAMS, default='all')
+    p.add_argument('--inventory', choices=catalog.INVENTORIES, default='all')
+    p.add_argument('--scope', choices=catalog.SCOPES, default='all')
     p = commands.add_parser("story")
     p.add_argument("key")
+    p.add_argument("--include-history", action="store_true")
     p = commands.add_parser("tc-stories")
     p.add_argument("tc_id")
     p.add_argument("--version")
@@ -210,6 +251,29 @@ def main():
         result = db.rpc("context") if isinstance(db, Remote) else dict(backend="local", namespace=namespace, db_path=str(db))
         if isinstance(db, Remote) and "*" not in result.get("namespaces", []) and namespace not in result.get("namespaces", []):
             raise ValueError("공용 서버에 이 프로젝트의 namespace 권한이 없습니다")
+    elif args.command == 'team-stats':
+        if isinstance(db, Remote):
+            result = db.rpc('catalog.teams')
+        elif not Path(db).is_file():
+            result = dict(status='unavailable', reason='DB 미생성')
+        else:
+            with closing(registry.connect(db)) as connection:
+                result = catalog.team_summary(connection, namespace)
+    elif args.command in {'notify-change', 'notify-source', 'sync-status'}:
+        if not isinstance(db, Remote):
+            result = dict(status='local_only')
+        elif args.command == 'sync-status':
+            result = db.rpc('sync.status', dict(event_id=args.event_id) if args.event_id else {})
+        elif args.command == 'notify-source':
+            observed = draft_core.load(args.readback)
+            if observed.get('key') != args.tc_key or not isinstance(observed.get('links', {}).get('issues'), list):
+                raise ValueError('실제 TC 키와 Issue Link를 재조회한 metadata가 필요합니다')
+            result = db.notify(args.tc_key, args.event_id, args.story_key)
+        else:
+            folder, state, _, _ = draft_core.context(args.prepared)
+            if state['status'] != 'verified':
+                raise ValueError('원본 재조회 verified 이후에만 변경을 알립니다')
+            result = db.notify(state['remote_key'], operation_id(state['remote_key'], str(folder.resolve()) + state['readback_hash'] + registry.canonical(sorted(set(args.story_key)))), args.story_key)
     elif args.command == "shared-rpc":
         if not isinstance(db, Remote):
             raise ValueError("shared-rpc는 공용 서버 설정에서만 사용합니다")
@@ -225,8 +289,10 @@ def main():
         result = story_call(db, namespace, "stories.import", payload)
     elif args.command == "stories-search":
         result = story_call(db, namespace, "stories.search", dict(q=args.query, limit=args.limit, offset=args.offset, unlinked=args.unlinked))
+    elif args.command == "lookup":
+        result = story_call(db, namespace, "stories.lookup", dict(q=args.query, limit=args.limit, offset=args.offset, team=args.team, inventory=args.inventory, scope=args.scope))
     elif args.command == "story":
-        result = story_call(db, namespace, "stories.get", dict(key=args.key))
+        result = story_call(db, namespace, "stories.get", dict(key=args.key, include_history=args.include_history))
     elif args.command == "tc-stories":
         result = story_call(db, namespace, "stories.for-case", dict(tc_id=args.tc_id, version=args.version))
     elif args.command in {"link-plan", "link-record"}:
@@ -237,7 +303,7 @@ def main():
             raise ValueError("이관 TC의 프로젝트가 설정과 다릅니다")
         result = db.rpc("imports.add", dict(bundle=bundle)) if isinstance(db, Remote) else registry.ingest(db, bundle, namespace)
     elif args.command == "search":
-        result = search(db, namespace, args.query, args.limit)
+        result = search(db, namespace, args.query, args.limit, args.team, args.inventory, args.scope)
     elif args.command == "stats":
         result = db.rpc("overview") if isinstance(db, Remote) else registry.stats(db, namespace) if db.is_file() else {"status": "unavailable", "reason": "DB 미생성"}
     elif args.command == "show":

@@ -10,10 +10,10 @@
 !/setup-defaults.json
 !/update-source.json
 !/MANIFEST.sha256.json
-!/Install-TC-Manager.cmd
-!/Connect-Zephyr.cmd
-!/Connect-TC-Library.cmd
-!/Update-TC-Manager.cmd
+!/1-Install-TC-Manager.cmd
+!/2-Connect-Zephyr.cmd
+!/3-Connect-TC-Library.cmd
+!/4-Update-TC-Manager.cmd
 **/__pycache__/
 **/*.pyc
 **/.env*

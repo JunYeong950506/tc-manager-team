@@ -2,12 +2,12 @@
 
 ## 공용 PC 연결
 
-공용 서버의 등록 사용자는 모두 admin·전체 프로젝트 권한을 사용한다. 최초 접근하는 프로젝트는 요청에서 확인한 실제 Jira 사이트와 프로젝트 키로 `<사이트호스트>/<프로젝트키>` namespace를 결정한다. 기존 명시적 매핑은 그대로 우선한다. 서버 권한을 추가하거나 코드에 프로젝트 목록을 수정할 필요가 없다. Jira/Zephyr 자체의 접근 권한은 별개이며, 프로젝트 자동 구획 생성은 실제 자료 수집이나 원격 권한 확인을 뜻하지 않는다. 로컬 모드는 기존 매핑 정책을 유지한다.
+공용 서버 접속자는 공통 사용자(shared-user), admin·전체 프로젝트 권한을 사용한다. 개인 접속 토큰은 사용하지 않으며 과거 작성자 기록은 보존한다. 최초 접근하는 프로젝트는 요청에서 확인한 실제 Jira 사이트와 프로젝트 키로 `<사이트호스트>/<프로젝트키>` namespace를 결정한다. 기존 명시적 매핑은 그대로 우선한다. 서버 권한을 추가하거나 코드에 프로젝트 목록을 수정할 필요가 없다. Jira/Zephyr 자체의 접근 권한은 별개이며, 프로젝트 자동 구획 생성은 실제 자료 수집이나 원격 권한 확인을 뜻하지 않는다. 로컬 모드는 기존 매핑 정책을 유지한다.
 
-기본은 기존 로컬 DB다. `Connect-TC-Library.cmd`를 실행하고 운영자가 알려준 HTTPS 주소와 개인 TC 서버 토큰을 입력하면 권한 확인 후 다음 설정을 추가한다. 원본 설정은 백업하며 db_path와 namespace는 보존한다. 토큰 자체는 JSON에 저장하지 않는다.
+기본은 기존 로컬 DB다. `3-Connect-TC-Library.cmd`를 실행하고 같은 사내망에서 운영자가 알려준 서버 주소(사설 IPv4는 HTTP, 기존 HTTPS도 지원)만 입력하면 연결 확인 후 다음 설정을 추가한다. 원본 설정은 백업하며 db_path와 namespace는 보존한다. 기존 token_env 설정은 더 이상 사용하지 않으며 이전 환경변수는 삭제하지 않는다.
 
 ```json
-{"backend":"shared","server_url":"https://tc-server.example.invalid:5190","token_env":"TC_MANAGER_TOKEN"}
+{"backend":"shared","server_url":"http://192.168.30.246:5190"}
 ```
 
 아래 tc_library 명령은 이 설정에서 공용 API로 조회·저장한다. 장애 시 로컬 저장으로 전환하지 않는다. `connection`으로 현재 서버 접근 권한을 확인한다. `backend:local`로 복귀하면 보존된 로컬 DB를 사용하지만 공용 서버의 변경 사항이 자동 복사되지는 않는다. 공용 서버 설치와 기존 DB 이관은 서버 패키지의 README를 따른다. 플러그인 자동 업데이트만으로 서버 설치·로컬 데이터 이관이 완료되지 않는다.
@@ -17,7 +17,7 @@
 공용 검색은 서버의 versions/current_version 표시를 보고 기준 버전을 구분한다. 과거 후보가 함께 반환될 수 있으므로 마지막 항목이나 버전 이름만으로 최신을 고르지 않는다. Story 조회·연결은 `story-traceability.md`를 따른다.
 
 ## 설정과 현재 데이터
-`scripts/tc_library.py`는 기존 SQLite registry 스키마를 재사용한다. Python 3.10+ 표준 라이브러리만 필요하다. `tc_registry.py`와 `qa_manage.py`는 기존 구현을 변경 없이 포함한다. DB를 새로 만들어 과거 TC를 숨기거나 기존 DB를 초기화하지 않는다.
+`scripts/tc_library.py`는 기존 SQLite registry 스키마를 재사용한다. Python 3.10+ 표준 라이브러리만 필요하다. DB 형식 2는 해시 참조와 무손실 압축을 사용하며 논리 응답과 TC 내용 해시는 유지한다. DB를 새로 만들어 과거 TC를 숨기거나 기존 DB를 초기화하지 않는다.
 프로젝트 `.tc-manager/library.json`:
 ```json
 {
@@ -43,7 +43,7 @@ python -X utf8 <plugin>/scripts/tc_library.py --site <site> --project <project> 
 - 결과는 TC별 묶음이다. 버전 수를 TC 수로 부르지 않는다. title/objective/precondition/script의 검색어 일치를 보여주며 전체 Script와 근거는 show로 읽는다.
 - 검색은 단어/한글 조각 후보 검색이다. 동의어·관련 기능을 몇 가지로 확장하고 목적·조건·입력·기대 결과를 직접 비교한다. 의미상 중복 판정이나 누락 없는 검색을 코드가 보증하지 않는다.
 - DB 없음은 unavailable이다. 후보 없음은 조회 범위 내 결과이며 Zephyr에 존재하지 않는다는 뜻이 아니다.
-- 수집 범위·폴더·시각·pagination 완료·실제 TC 키 목록을 작업의 coverage.json에 남긴다. 최초 지정 범위를 수집하고, 이후 변경된 대상과 사용하려는 후보를 최신 원격 조회로 보완한다. 마지막 변경 정보를 못 읽으면 증분 완료라고 주장하지 않는다. 현재 도구에는 자동 동기화 데몬이 없다.
+- 수집 범위·폴더·시각·pagination 완료·실제 TC 키 목록을 작업의 coverage.json에 남긴다. 최초 지정 범위를 수집하고, 이후 변경된 대상과 사용하려는 후보를 최신 원격 조회로 보완한다. 마지막 변경 정보를 못 읽으면 증분 완료라고 주장하지 않는다. 공용 서버는 설정된 원본 조회 인증으로 하루 1회와 변경 알림을 처리한다. source_catalog.items와 source_status를 함께 확인한다.
 - DB 후보가 허용된 쓰기 범위 밖이면 참고 자료로만 사용한다. 등록/수정/이동 전에 원격 key·프로젝트·폴더·실제 내용을 확인한다.
 
 ## 구획별 해석과 분류
@@ -75,3 +75,50 @@ python -X utf8 <plugin>/scripts/tc_library.py --site <site> --project <project> 
 기존 TC 조회/수정본은 전체 재조회·대조 자료를 남긴 후 bundled tc_registry.py set-current를 사용한다. show의 current_version을 --expected-version에 그대로 넣는다. 불완전한 원문·미검토 초안을 원격 확인본으로 승격하지 않는다. 기존 2.0 bundle이 있으면 tc_registry.py ingest로 원문 그대로 저장할 수 있다.
 
 DB의 기존 bundle 스키마 status=draft는 문서 모델 필드이며 Zephyr의 Draft/Approved 상태가 아니다. 원격 최신 여부, 사람 승인, 등록 여부는 보존된 실제 증거로 따로 판단한다.
+
+## SQA/SQE 폴더 범위
+
+PX의 **우리 팀 KPI** 조회는 SQA 전체와 구분하여 `search <검색어> --scope px-kpi`를 사용한다. KPI 기준은 사용자가 확인한 2026-09-18의 **3,574개**, 폴더 ID **22244452** 및 하위 폴더다. 이름이 비슷한 다른 트리(56441742)를 포함하지 않는다. `team-stats`의 `kpi.baseline_count`와 `kpi.current_count`를 별도로 보고하고 현재 수를 기준 수에 억지로 맞추지 않는다. 최초 DB는 2026-09-30 폴더 ID/부모 스냅샷, 이후 원본 갱신은 실제 조상 폴더 ID로 판별한다. 새 폴더의 조상을 확인하지 못하면 미확인 건수로 남기며 경로명만으로 KPI에 넣지 않는다. PXW·PXM의 KPI 범위는 아직 지정하지 않았다.
+
+우리 팀 TC 조회는 `team-stats`로 범위를 확인하고 `search <검색어> --team SQA --inventory active`를 사용한다. `lookup <검색어> --team SQA --inventory active`도 TC 후보에 같은 필터를 적용한다. `all`, `SQE`, `unclassified`로 다른 범위를 명시할 수 있으며 기존 호출의 기본값은 전체 보존을 위해 `all`이다. 중복 검토 시 SQA 후보를 먼저 보고, SQE·미분류 후보도 별도 확인하여 팀 필터만으로 전체 중복 없음이라고 결론내리지 않는다.
+
+분류는 원본 폴더 경로의 SQA/SQE 표시를 따른다. 둘 다 있거나 표시가 없으면 `unclassified`이며 소유자를 추측하지 않는다. `inventory_status`는 `카운트 금지` 경로를 `excluded`, 최상위 `[Test]` 폴더를 `test`, 나머지를 `active`로 구분한다. `active`는 사용 승인·실행 준비 완료를 뜻하지 않는다. 제외/시험용까지 팀 전체를 볼 때는 `--inventory all`을 사용한다. 폴더 원문과 내용 해시는 보존하며 새 프로젝트도 같은 규칙을 적용한다.
+
+공용 서버의 `catalog.teams`와 `catalog.search`, `cases.list` 응답에 팀 구분이 포함된다. Story의 연결 TC에도 `team_scope`가 표시된다. Story 자체를 한 팀 소유로 단정하지 않으며 `lookup`의 Story 검색은 전체 요구사항 범위를 유지한다. 폴더 이동은 다음 원본 갱신 결과로 분류에 반영되며, 루트에 만든 신규 TC는 팀 폴더가 확인될 때까지 미분류로 남는다. 기존 로컬 DB는 저장된 `source_folder`를 사용하며 폴더 정보가 없으면 미분류다.
+
+```text
+python -X utf8 <plugin>/scripts/tc_library.py --site <site> --project <project> team-stats
+python -X utf8 <plugin>/scripts/tc_library.py --site <site> --project <project> search 로그인 --team SQA --inventory active
+python -X utf8 <plugin>/scripts/tc_library.py --site <site> --project <project> search 로그인 --team all
+```
+
+## 원본 변경 직후 알림
+
+Zephyr create/update와 Test Script·Issue Link 재조회 검증이 끝나면 DB store 성공 여부와 무관하게 먼저 알린다. prepared는 tc_draft.py의 verified 상태 폴더이며 알림은 Zephyr 쓰기를 실행하지 않는다.
+
+```text
+python -X utf8 <plugin>/scripts/tc_library.py --site <site> --project <project> notify-change <prepared> --story-key <실제Story키>
+python -X utf8 <plugin>/scripts/tc_library.py --site <site> --project <project> sync-status --event-id <반환된작업ID>
+```
+
+여러 Story는 --story-key를 반복한다. 같은 작업 재시도에는 같은 prepared와 Story 목록을 쓴다. 알림은 `.tc-manager/sync-outbox.sqlite3`에 먼저 보존하고 다음 DB 작업·연결 시 같은 서버의 모든 프로젝트 알림을 재전송한다. 서버 접수는 반영 완료가 아니다. 서버 작업자가 TC와 실제 연결 Story를 다시 읽은 후 completed가 된다. 보고에서는 **Zephyr 등록 완료 / 공용 DB 반영 대기 / 공용 DB 반영 완료**를 구분한다. DB 장애 때문에 TC 생성 명령을 다시 실행하지 않는다. `select-verified`에도 알림이 포함되지만 store 이전 알림을 생략하지 않는다. 원본 카탈로그 갱신은 검토 승인이나 current 버전 변경이 아니다.
+
+공용 검색의 `source_catalog.items`는 서버에서 최근 원본 조회한 후보이다. 기존 `items`의 저장·검토 버전과 함께 대조하고 같은 TC 키를 중복 TC로 세지 않는다. 상세 단계가 없는 카탈로그는 원본 전체 Test Script를 추가 조회한다. 단계 수를 단계 본문으로 해석하지 않는다.
+
+## DB 형식 1에서 2로 이전
+
+서버 또는 로컬 DB 작성 작업을 멈추고 원본을 유지한 채 새 파일로 변환한다. `--output`은 아직 없는 경로여야 한다.
+
+```text
+python -X utf8 <plugin>/scripts/tc_compact.py --source <기존DB> --output <새DB> --report <검증.json>
+```
+
+전체 행·내용 해시·무결성 대조 성공 후 운영자가 백업을 보관하고 새 DB를 실제 사용 경로에 적용한다. 새 코드가 구형 DB를 자동 초기화하지 않는다. 기존 DB의 TC·Story·연결·검토 이력은 유지한다. 설치/자동 업데이트만으로 DB 변환은 실행하지 않는다.
+
+기존 TC 수정처럼 prepared 폴더를 사용하지 않은 작업은 본문·단계·연결 재조회가 끝난 뒤 다음 명령을 사용한다. 작업 ID는 작업 폴더에 한 번 생성해 저장하고 재전송 때 재사용한다. 새로운 수정에는 새 작업 ID를 쓴다. metadata는 실제 재조회 파일이며 TC 키와 Issue Link 목록이 있어야 한다.
+
+```text
+python -X utf8 <plugin>/scripts/tc_library.py --site <site> --project <project> notify-source --tc-key <TC키> --event-id <고유작업ID> --readback <metadata.json> --story-key <Story키>
+```
+
+공용 원본 카탈로그가 수집된 경우 초기 `catalog-` 버전은 현재 원본 검색에서 확인하고, 저장본 목록에서는 제외해 같은 TC를 두 번 전체 스캔하지 않는다. 기존 cases.list API의 기본 응답은 유지하며 이 최적화는 공용 검색 어댑터가 명시적으로 요청한다.

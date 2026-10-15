@@ -28,6 +28,13 @@ def export_local(config_path, site, project, output, source_namespace=None):
         tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if 'story_snapshots' in tables:
             records += [('story', json.loads(row[0])) for row in db.execute('SELECT raw_json FROM story_snapshots WHERE namespace=? ORDER BY updated_at', (namespace,))]
+        if 'story_source_views' in tables:
+            for row in db.execute('SELECT * FROM story_source_views WHERE namespace=? ORDER BY updated_at,observed_at', (namespace,)):
+                story = dict(json.loads(row['view_json']), fetched_at=row['observed_at'])
+                records.append(('story-source', dict(stories=[story],
+                    scope=dict(query='source-preserving migration', observed_at=row['observed_at'], complete=False),
+                    source_records=[dict(key=row['issue_key'], raw_issue=json.loads(row['raw_json']),
+                        extractor=row['extractor'], warnings=json.loads(row['warnings_json']))])))
         if 'story_link_reads' in tables:
             for row in db.execute('SELECT * FROM story_link_reads WHERE namespace=? ORDER BY observed_at', (namespace,)):
                 records.append(('links', dict(tc_id=row['tc_id'], version=row['version'], content_hash=row['content_hash'], observed_at=row['observed_at'], links=json.loads(row['payload_json'])['raw'], complete=True)))
@@ -60,7 +67,7 @@ def import_shared(config_path, site, project, directory):
     records = []
     for entry in manifest['entries']:
         path = (directory / entry['file']).resolve()
-        if path.parent != directory or entry['kind'] not in {'bundle', 'story', 'links'}:
+        if path.parent != directory or entry['kind'] not in {'bundle', 'story', 'story-source', 'links'}:
             raise ValueError('이관 파일 경로/종류를 확인하세요')
         content = path.read_bytes()
         if hashlib.sha256(content).hexdigest() != entry['sha256']:
@@ -70,6 +77,8 @@ def import_shared(config_path, site, project, directory):
             raise ValueError('다른 프로젝트 TC를 이관할 수 없습니다')
         if entry['kind'] == 'story' and (not value['key'].startswith(project + '-') or value['source_url'] != site.rstrip('/') + '/browse/' + value['key']):
             raise ValueError('다른 사이트/프로젝트 Story를 이관할 수 없습니다')
+        if entry['kind'] == 'story-source' and any(not row['key'].startswith(project + '-') or row['source_url'] != site.rstrip('/') + '/browse/' + row['key'] for row in value['stories']):
+            raise ValueError('다른 사이트/프로젝트 Story 원본을 이관할 수 없습니다')
         records.append((entry, value))
     if hashlib.sha256((directory / 'source-history.json').read_bytes()).hexdigest() != manifest['history_sha256']:
         raise ValueError('원본 이력 파일 해시가 다릅니다')
@@ -84,6 +93,8 @@ def import_shared(config_path, site, project, directory):
                 result = remote.rpc('imports.add', dict(bundle=value, source_label='local-migration'))
             elif entry['kind'] == 'story':
                 result = remote.rpc('stories.import', dict(stories=[value], scope=dict(query='local migration; source-history.json에 원본 범위 보존', observed_at=value['fetched_at'], complete=False)))
+            elif entry['kind'] == 'story-source':
+                result = remote.rpc('stories.import', value)
             else:
                 result = remote.rpc('stories.links.record', value)
             journal['completed'].append(dict(file=entry['file'], result=result))

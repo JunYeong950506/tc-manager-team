@@ -25,7 +25,7 @@ function Get-TcFileDigest([string]$Path) {
 function Get-TcUpdateInstallation([string]$Claude, [string]$Root) {
     $tcInstalled = Invoke-TcUpdateCli $Claude @('plugin', 'list', '--json') | ConvertFrom-Json
     $tcMatch = @($tcInstalled | Where-Object { $_.id -eq 'tc-manager@tc-manager-team' -and $_.scope -eq 'local' -and (Test-TcSamePath $_.projectPath $Root) })
-    if ($tcMatch.Count -ne 1) { throw 'No unique local TC Manager installation exists at THIS exact folder. Keep the original folder path, or run Install-TC-Manager.cmd for a new installation.' }
+    if ($tcMatch.Count -ne 1) { throw 'No unique local TC Manager installation exists at THIS exact folder. Keep the original folder path, or run 1-Install-TC-Manager.cmd for a new installation.' }
     return $tcMatch[0]
 }
 
@@ -62,7 +62,7 @@ function Invoke-TcUpdate {
             if (Test-Path -LiteralPath $tcPath) { $tcProtected[$tcName] = Get-TcFileDigest $tcPath }
         }
         if (-not $tcProtected.ContainsKey('.tc-manager/target.json') -or -not $tcProtected.ContainsKey('.tc-manager/library.json')) {
-            throw 'Existing workspace settings are missing. Restore them or run Install-TC-Manager.cmd for a new workspace.'
+            throw 'Existing workspace settings are missing. Restore them or run 1-Install-TC-Manager.cmd for a new workspace.'
         }
         $tcAlias = Join-Path $tcRoot '.claude/skills/tc-manager/SKILL.md'
         $tcAliasSource = Join-Path $tcPlugin 'references/short-command/SKILL.md'
@@ -132,7 +132,7 @@ function Invoke-TcUpdate {
             }
         }
         Write-Host ('Update complete: ' + $tcVersion + '. Token, connection settings and TC data were retained.') -ForegroundColor Green
-        Write-Host 'Open a new Claude Code session in THIS same folder to load the updated plugin. No token entry or Connect-Zephyr.cmd is needed unless the connection itself has changed.'
+        Write-Host 'Open a new Claude Code session in THIS same folder to load the updated plugin. No token entry or 2-Connect-Zephyr.cmd is needed unless the connection itself has changed.'
     } finally { Pop-Location }
 }
 

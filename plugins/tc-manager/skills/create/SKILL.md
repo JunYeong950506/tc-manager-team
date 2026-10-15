@@ -21,4 +21,6 @@ argument-hint: 요구사항 또는 Jira 링크
 
 결과: 읽기용 TC + 출처 + 기존 TC와 차이 + DB 저장 결과 + Zephyr 실제 key/반영 상태. 테스트 실행과 Pass/Fail은 포함하지 않는다.
 
-Jira 요구사항에서 작성한 TC는 `../../references/story-traceability.md`에 따라 원본 티켓의 다대다 Coverage 연결도 등록·재조회하고, 본문 검증과 링크 검증 결과를 분리해 표시한다.
+새로 생성하는 TC는 Labels에 `ai_agent`를 기본 포함한다. 지정된 기존 라벨은 draft.json의 labels 배열로 보존하여 함께 전달하고, publish-new.md의 재조회로 누락을 확인한다. 기존 TC의 수정·재사용에는 자동 추가하지 않는다.
+
+Jira 요구사항에서 작성한 TC는 `../../references/story-traceability.md`에 따라 원본 티켓의 다대다 Coverage 연결도 등록·재조회한다. 제목의 대괄호에 넣은 Jira 티켓 키(예: `[PXW-754]`)는 Traceability → Work Items → Coverage에도 실제로 연결되어야 한다. 제목에 키를 적는 것만으로 연결 완료로 처리하지 않으며, 본문 검증과 링크 검증 결과를 분리해 표시한다.

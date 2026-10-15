@@ -120,7 +120,7 @@ function Confirm-TcWorkspaceTrust([string]$Project) {
     $tcConfigPath = Get-TcClaudeConfigPath
     $tcConfig = if (Test-Path -LiteralPath $tcConfigPath) { Get-Content -LiteralPath $tcConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { [pscustomobject]@{} }
     if ($tcConfig.projects -and $tcConfig.projects.$tcKey.hasTrustDialogAccepted -eq $true) { return }
-    if (-not (Test-TcInteractive)) { throw '폴더 신뢰 승인이 필요합니다. Connect-Zephyr.cmd를 더블클릭하세요. 신뢰 설정은 변경하지 않았습니다.' }
+    if (-not (Test-TcInteractive)) { throw '폴더 신뢰 승인이 필요합니다. 2-Connect-Zephyr.cmd를 더블클릭하세요. 신뢰 설정은 변경하지 않았습니다.' }
     Write-Host 'Claude에 이 작업 폴더의 신뢰 승인이 저장되지 않았습니다.' -ForegroundColor Yellow
     Write-Host ('작업 폴더: ' + $tcKey)
     Write-Host '승인하면 Claude가 이 폴더의 설정·플러그인·명령을 불러옵니다. 다른 폴더와 도구 권한은 변경하지 않습니다.'
@@ -148,7 +148,7 @@ function Invoke-TcMcpApproval([string]$Claude, [string]$Name) {
     Write-Host 'TC 작업은 요청하지 않습니다. Zephyr 토큰을 Claude 채팅에 입력하지 마세요.'
     & $Claude
     if ($LASTEXITCODE -ne 0) {
-        throw '[CLAUDE_CANCELLED] Claude Code가 취소되거나 시작하지 못했습니다. Connect-Zephyr.cmd를 다시 실행하세요. 설정은 보존했습니다.'
+        throw '[CLAUDE_CANCELLED] Claude Code가 취소되거나 시작하지 못했습니다. 2-Connect-Zephyr.cmd를 다시 실행하세요. 설정은 보존했습니다.'
     }
 }
 
@@ -163,12 +163,38 @@ function Resolve-TcClaude([string]$Requested) {
     if ($tcInstalled) { return $tcInstalled.Source }
     $tcNpmInstalled = Get-Command claude.cmd -ErrorAction SilentlyContinue
     if ($tcNpmInstalled) { return $tcNpmInstalled.Source }
-    throw '[CLAUDE_MISSING] Claude Code를 찾지 못했습니다. Install-TC-Manager.cmd로 설치하거나 -ClaudePath를 지정하세요.'
+    throw '[CLAUDE_MISSING] Claude Code를 찾지 못했습니다. 1-Install-TC-Manager.cmd로 설치하거나 -ClaudePath를 지정하세요.'
+}
+
+function Get-TcClaudeLoginState([string]$Claude) {
+    $tcPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $tcOutput = (& $Claude auth status --json 2>$null | Out-String)
+        $tcExit = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $tcPreference }
+    try { $tcAuth = $tcOutput | ConvertFrom-Json } catch { return 'unknown' }
+    if ($tcAuth.loggedIn -isnot [bool]) { return 'unknown' }
+    if ($tcAuth.loggedIn -and $tcExit -eq 0) { return 'signed_in' }
+    if (-not $tcAuth.loggedIn) { return 'signed_out' }
+    return 'unknown'
+}
+
+function Confirm-TcClaudeLogin([string]$Claude, [switch]$CheckOnly) {
+    $tcLogin = Get-TcClaudeLoginState $Claude
+    if ($tcLogin -eq 'unknown') { throw '[CLAUDE_AUTH_CHECK_FAILED] CLI 로그인 상태를 확인하지 못했습니다. Claude Code 버전과 auth status 명령 지원 여부를 확인하세요.' }
+    if ($tcLogin -eq 'signed_in') { Write-Host 'Claude CLI 로그인 확인 완료.'; return }
+    if ($CheckOnly -or -not (Test-TcInteractive)) { throw '[CLAUDE_LOGIN_REQUIRED] Claude CLI 로그인이 필요합니다. 2-Connect-Zephyr.cmd를 더블클릭하면 같은 창에서 로그인부터 진행합니다.' }
+    Write-Host 'Claude CLI는 설치되어 있지만 로그인되지 않았습니다. 브라우저에서 회사 Claude 계정으로 로그인하세요. 완료하면 이 창에서 Zephyr 설정을 이어갑니다.' -ForegroundColor Yellow
+    & $Claude auth login --claudeai
+    if ($LASTEXITCODE -ne 0) { throw '[CLAUDE_LOGIN_INCOMPLETE] Claude CLI 로그인이 완료되지 않았습니다. Zephyr 토큰과 MCP 설정은 변경하지 않았습니다. 2-Connect-Zephyr.cmd를 다시 실행하세요.' }
+    if ((Get-TcClaudeLoginState $Claude) -ne 'signed_in') { throw '[CLAUDE_LOGIN_INCOMPLETE] CLI 로그인 완료를 확인하지 못했습니다. Zephyr 토큰과 MCP 설정은 변경하지 않았습니다.' }
+    Write-Host 'Claude CLI 로그인 확인 완료.' -ForegroundColor Green
 }
 
 function Test-TcNode {
     $tcNode = Get-Command node.exe -ErrorAction SilentlyContinue
-    if (-not $tcNode -or -not (Get-Command npx.cmd -ErrorAction SilentlyContinue)) { throw '[NODE_MISSING] npm/npx를 포함한 Node.js 22 이상이 필요합니다. Install-TC-Manager.cmd를 실행하세요.' }
+    if (-not $tcNode -or -not (Get-Command npx.cmd -ErrorAction SilentlyContinue)) { throw '[NODE_MISSING] npm/npx를 포함한 Node.js 22 이상이 필요합니다. 1-Install-TC-Manager.cmd를 실행하세요.' }
     $tcVersion = & $tcNode.Source --version
     if ($LASTEXITCODE -ne 0 -or $tcVersion -notmatch '^v(\d+)\.' -or [int]$Matches[1] -lt 22) { throw '[NODE_VERSION] Node.js 22 이상이 필요합니다.' }
 }
@@ -211,21 +237,22 @@ function Invoke-TcConnect {
     if (-not $PSBoundParameters.ContainsKey('OpenInChrome')) { $OpenInChrome = $tcSettings.open_in_chrome -eq $true }
     $tcClaude = Resolve-TcClaude $ClaudePath
     Test-TcNode
+    Confirm-TcClaudeLogin $tcClaude -CheckOnly:$CheckOnly
     $tcConfigPath = Join-Path $tcProject '.mcp.json'
     $tcConfig = if (Test-Path -LiteralPath $tcConfigPath) { Get-Content -LiteralPath $tcConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { [pscustomobject]@{ mcpServers = [pscustomobject]@{} } }
     if ($null -eq $tcConfig.mcpServers -or $tcConfig.mcpServers -isnot [pscustomobject]) { throw 'mcpServers 설정 형식이 잘못되었습니다.' }
     $tcServer = $tcConfig.mcpServers.$ServerName
     $tcCurrent = Test-TcMcpDefinition $tcServer $tcProject
     $tcLocal = $tcCurrent -or (Test-TcLegacyMcpDefinition $tcServer)
-    if ($CheckOnly -and -not $tcLocal) { throw 'API 토큰 MCP 설정이 없습니다. 먼저 -CheckOnly 없이 Connect-Zephyr.cmd를 실행하세요.' }
+    if ($CheckOnly -and -not $tcLocal) { throw 'API 토큰 MCP 설정이 없습니다. 먼저 -CheckOnly 없이 2-Connect-Zephyr.cmd를 실행하세요.' }
     if ($tcServer -and -not $tcLocal -and -not ($tcServer.type -eq 'http' -and $tcServer.url -eq 'https://zephyr.mcp.smartbear.com/mcp')) {
         throw '사용자 지정 MCP 설정은 덮어쓰지 않았습니다. 별도 -ServerName을 지정하세요.'
     }
     $tcToken = Get-TcUserToken
     $tcNew = $ReplaceToken -or [string]::IsNullOrWhiteSpace($tcToken)
     if ($tcNew) {
-        if ($CheckOnly) { throw 'Windows 사용자 변수 ZEPHYR_API_TOKEN이 없습니다. 먼저 Connect-Zephyr.cmd를 실행하세요.' }
-        if (-not (Test-TcInteractive)) { throw 'Connect-Zephyr.cmd를 더블클릭하여 토큰을 입력하세요. 설정은 변경하지 않았습니다.' }
+        if ($CheckOnly) { throw 'Windows 사용자 변수 ZEPHYR_API_TOKEN이 없습니다. 먼저 2-Connect-Zephyr.cmd를 실행하세요.' }
+        if (-not (Test-TcInteractive)) { throw '2-Connect-Zephyr.cmd를 더블클릭하여 토큰을 입력하세요. 설정은 변경하지 않았습니다.' }
         $TokenPageUrl = Resolve-TcTokenPage $TokenPageUrl $tcProject
         Write-Host '열리는 브라우저에서 Zephyr API 토큰을 발급받아 이 창에만 입력하세요. 채팅에 붙여 넣지 마세요.'
         Open-TcTokenPage $TokenPageUrl ([bool]$OpenInChrome)
@@ -260,7 +287,15 @@ function Invoke-TcConnect {
     Push-Location -LiteralPath $tcProject
     try {
         $env:ZEPHYR_API_TOKEN = $tcToken
-        if (-not $CheckOnly) {
+        $tcStatus = $null
+        if (-not $CheckOnly -and $tcLocal -and -not $tcNew -and -not $RepairCache) {
+            Write-Host '기존 등록의 CLI MCP 연결을 먼저 확인합니다.'
+            $tcStatus = Get-TcMcpStatus $tcClaude $ServerName
+            if ($tcStatus -eq 'Connected') {
+                Write-Host 'CLI MCP 연결 확인 완료. 별도 MCP 시작 검사는 생략합니다.' -ForegroundColor Green
+            }
+        }
+        if (-not $CheckOnly -and $tcStatus -ne 'Connected') {
             try { Initialize-TcRuntime -RepairCache:$RepairCache }
             catch {
                 $tcRuntimeError = $_
@@ -270,7 +305,7 @@ function Invoke-TcConnect {
                     Write-Host '토큰과 MCP 서버 설정은 저장된 상태입니다. MCP 시작 검사가 실패해 연결 확인은 미완료입니다.' -ForegroundColor Yellow
                 }
                 Write-Host 'Claude 앱의 현재 연결 상태는 확인하지 못했습니다. 이 결과만으로 기존 연결이 끊겼다고 판단하지 않습니다.'
-                Write-Host '기존 연결 확인은 Claude에서 Zephyr 조회로 진행하세요. 스킬 자동 업데이트 시험만 하는 경우 Connect-Zephyr.cmd 재실행은 필요하지 않습니다.'
+                Write-Host '기존 연결 확인은 Claude에서 Zephyr 조회로 진행하세요. 스킬 자동 업데이트 시험만 하는 경우 2-Connect-Zephyr.cmd 재실행은 필요하지 않습니다.'
                 if (-not $RepairCache -and $_.Exception.Message -match '^\[(EINTEGRITY|ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND|ENOENT)\]' -and (Test-TcInteractive)) {
                     Write-Host $_.Exception.Message -ForegroundColor Yellow
                     $tcRepair = Read-Host '전용 캐시를 새로 준비하고 한 번 재검사할까요? 기존 캐시는 삭제하지 않습니다. [y/N]'
@@ -280,24 +315,24 @@ function Invoke-TcConnect {
             }
         }
         if (-not $CheckOnly) { Confirm-TcWorkspaceTrust $tcProject }
-        $tcStatus = Get-TcMcpStatus $tcClaude $ServerName
+        if ($tcStatus -ne 'Connected') { $tcStatus = Get-TcMcpStatus $tcClaude $ServerName }
         Write-Host "MCP 서버: $ServerName / 상태: $tcStatus"
         if ($tcStatus -eq 'Pending approval') {
             Write-Host 'API 토큰은 유효합니다. 이 작업 폴더에서 MCP 사용 승인이 필요합니다.' -ForegroundColor Yellow
             Write-Host ("작업 폴더: {0}" -f $tcProject)
             if ($CheckOnly) { throw '[MCP_APPROVAL_PENDING] API 토큰 검증 통과. 이 폴더의 MCP 사용 승인 대기 중이며 연결 검증은 미완료입니다.' }
             if (-not (Test-TcInteractive)) {
-                throw '[INTERACTIVE_REQUIRED] 대화형 창에서 MCP 승인이 필요합니다. Connect-Zephyr.cmd를 더블클릭하세요. 토큰과 설정은 저장했으며 토큰 재발급은 필요하지 않습니다.'
+                throw '[INTERACTIVE_REQUIRED] 대화형 창에서 MCP 승인이 필요합니다. 2-Connect-Zephyr.cmd를 더블클릭하세요. 토큰과 설정은 저장했으며 토큰 재발급은 필요하지 않습니다.'
             }
             Invoke-TcMcpApproval $tcClaude $ServerName
             Write-Host 'Claude Code에서 돌아왔습니다. MCP 연결을 다시 확인합니다...'
             $tcStatus = Get-TcMcpStatus $tcClaude $ServerName
             Write-Host "MCP 서버: $ServerName / 상태: $tcStatus"
             if ($tcStatus -eq 'Pending approval') {
-                throw '[MCP_APPROVAL_PENDING] 승인이 아직 대기 중입니다. Connect-Zephyr.cmd를 다시 실행하고 열린 Claude Code에서 서버를 승인하세요. 토큰 재발급은 필요하지 않습니다.'
+                throw '[MCP_APPROVAL_PENDING] 승인이 아직 대기 중입니다. 2-Connect-Zephyr.cmd를 다시 실행하고 열린 Claude Code에서 서버를 승인하세요. 토큰 재발급은 필요하지 않습니다.'
             }
         }
-        if ($tcStatus -ne 'Connected') { throw '[MCP_NOT_CONNECTED] API 토큰 검증은 통과했지만 Claude의 MCP 연결은 실패했습니다. /mcp에서 실행 오류·프로젝트 승인과 이전 MCP 프로세스를 확인하세요. 캐시 복구가 필요하면 Connect-Zephyr.cmd -RepairCache를 실행하세요. 토큰 재발급은 필요하지 않습니다.' }
+        if ($tcStatus -ne 'Connected') { throw '[MCP_NOT_CONNECTED] API 토큰 검증은 통과했지만 Claude의 MCP 연결은 실패했습니다. /mcp에서 실행 오류·프로젝트 승인과 이전 MCP 프로세스를 확인하세요. 캐시 복구가 필요하면 2-Connect-Zephyr.cmd -RepairCache를 실행하세요. 토큰 재발급은 필요하지 않습니다.' }
         Write-Host 'CLI의 MCP 연결을 확인했습니다. Claude 앱에서 프로젝트/TC 조회를 요청해 실제 API 도구 호출까지 확인하세요.' -ForegroundColor Green
         if (-not $CheckOnly) {
             Write-Host '설정 완료. Claude 앱을 완전히 종료 후 다시 열고 Code에서 아래 폴더로 새 세션을 시작하세요:'

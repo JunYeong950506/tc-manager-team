@@ -12,7 +12,7 @@ function Get-TcRuntimeCache {
     $tcGeneration = 'default'
     if (Test-Path -LiteralPath $tcState) {
         $tcGeneration = (Get-Content -LiteralPath $tcState -Raw -Encoding UTF8 | ConvertFrom-Json).generation
-        if ($tcGeneration -notmatch '^(default|[a-f0-9]{32})$') { throw '[CACHE_STATE] 전용 캐시 설정이 잘못되었습니다. Connect-Zephyr.cmd -RepairCache로 복구하세요.' }
+        if ($tcGeneration -notmatch '^(default|[a-f0-9]{32})$') { throw '[CACHE_STATE] 전용 캐시 설정이 잘못되었습니다. 2-Connect-Zephyr.cmd -RepairCache로 복구하세요.' }
     }
     return (Join-Path $tcRoot ('cache-' + $tcGeneration))
 }
@@ -104,11 +104,11 @@ function Initialize-TcRuntime([switch]$RepairCache) {
     if (-not $tcResult.ok) {
         $tcAdvice = switch -Regex ($tcResult.code) {
             '^START_TIMEOUT$' { '별도 MCP 프로세스에서 90초 안에 초기화 응답을 확인하지 못했습니다. 캐시 손상으로 확정된 것은 아닙니다. 잠시 후 다시 검사하고, 반복되면 진단 파일로 원인을 확인하세요. 토큰 재발급은 필요하지 않습니다.'; break }
-            'EINTEGRITY|MODULE_NOT_FOUND|ENOENT' { '패키지 설치/캐시 문제일 수 있습니다. Connect-Zephyr.cmd -RepairCache로 전용 캐시를 새로 준비하세요.'; break }
+            'EINTEGRITY|MODULE_NOT_FOUND|ENOENT' { '패키지 설치/캐시 문제일 수 있습니다. 2-Connect-Zephyr.cmd -RepairCache로 전용 캐시를 새로 준비하세요.'; break }
             'EPERM|EACCES' { '파일 접근이 차단됐습니다. 실행 중인 Claude 작업과 보안 프로그램의 차단 내역을 확인하세요.'; break }
             'EBADENGINE' { 'Node.js 버전을 확인하세요. 22 이상이 필요합니다.'; break }
             'ENOTFOUND|EAI_AGAIN|ECONNRESET|ETIMEDOUT|CERT|E401|E403' { 'npm 저장소의 네트워크·프록시·인증서·접근 권한을 확인하세요. Zephyr API 토큰 재발급으로 해결되지 않습니다.'; break }
-            default { 'MCP 시작을 확인하지 못했습니다. 진단 코드로 원인을 확인하고 다시 실행하세요. 캐시 복구는 Connect-Zephyr.cmd -RepairCache로 진행합니다.' }
+            default { 'MCP 시작을 확인하지 못했습니다. 진단 코드로 원인을 확인하고 다시 실행하세요. 캐시 복구는 2-Connect-Zephyr.cmd -RepairCache로 진행합니다.' }
         }
         throw ('[' + $tcResult.code + '] ' + $tcAdvice)
     }
