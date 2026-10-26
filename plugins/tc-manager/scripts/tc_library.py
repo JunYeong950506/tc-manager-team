@@ -307,7 +307,7 @@ def main():
     elif args.command == "stats":
         result = db.rpc("overview") if isinstance(db, Remote) else registry.stats(db, namespace) if db.is_file() else {"status": "unavailable", "reason": "DB 미생성"}
     elif args.command == "show":
-        result = db.rpc("cases.get", dict(id=args.tc_id, version=args.version)) if isinstance(db, Remote) else registry.show(db, namespace, args.tc_id, args.version)
+        result = db.show(args.tc_id, args.version) if isinstance(db, Remote) else registry.show(db, namespace, args.tc_id, args.version)
     elif args.command == "store":
         if not re.fullmatch(re.escape(args.project) + r"-T[1-9][0-9]*|DRAFT-[A-Za-z0-9_.-]+", args.tc_id):
             raise ValueError("TC ID가 요청 프로젝트 또는 DRAFT- 식별자가 아닙니다")

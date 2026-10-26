@@ -24,6 +24,12 @@ def lan_http_host(host):
         return False
 
 
+class RemoteError(ValueError):
+    def __init__(self, status, code, message):
+        self.status, self.code = status, code
+        super().__init__(message)
+
+
 class Remote:
     def __init__(self, config, namespace):
         value = config.get("server_url", "")
@@ -49,6 +55,23 @@ class Remote:
                 remote.outbox.flush(remote._rpc)
         return results
 
+    def show(self, tc_id, version=None):
+        args = dict(id=tc_id)
+        if version is not None:
+            args['version'] = version
+        try:
+            return self.rpc('cases.get', args)
+        except RemoteError as error:
+            if version is not None or error.code not in {'conflict', 'not_found'}:
+                raise
+            try:
+                result = self.rpc('catalog.get', dict(id=tc_id))
+            except ValueError:
+                raise error from None
+            if result.get('stored_version') is not None:
+                raise error
+            return dict(result, detail_kind='source_catalog', current_version=None)
+
     def notify(self, tc_key, event_id, story_keys=()):
         payload = dict(tc_key=tc_key, event_id=event_id, story_keys=sorted(set(story_keys)))
         self.outbox.put(payload)
@@ -71,7 +94,15 @@ class Remote:
             with urllib.request.build_opener(NoRedirect).open(req, timeout=20) as response:
                 raw = response.read(16 * 1024 * 1024 + 1)
         except urllib.error.HTTPError as error:
-            raise ValueError(f"공용 TC 서버 HTTP {error.code}. 권한/서버 상태를 확인하세요. 로컬 DB로 대체하지 않았습니다") from None
+            code = 'http_error'
+            try:
+                body = json.loads(error.read(65536))
+                value = body.get('error', {}).get('code', '')
+                if isinstance(value, str) and value.replace('_', '').isalnum():
+                    code = value[:80]
+            except (ValueError, AttributeError, OSError):
+                pass
+            raise RemoteError(error.code, code, f"공용 TC 서버 HTTP {error.code} ({code}). 로컬 DB로 대체하지 않았습니다") from None
         except (urllib.error.URLError, OSError):
             raise ValueError("공용 TC 서버 연결 실패. 산출물은 보존하고 재연결 후 조회부터 재개하세요. 로컬 DB로 대체하지 않았습니다") from None
         if len(raw) > 16 * 1024 * 1024:
