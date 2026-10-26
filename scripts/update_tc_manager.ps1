@@ -36,10 +36,10 @@ function Invoke-TcUpdate {
         Write-Host '1. ZIP 업데이트 (기본): 새 ZIP 적용, 기존 원격 연결은 유지'
         Write-Host '2. 원격 연결·자동 업데이트: 설정된 Git 저장소에서 설치/갱신'
         $tcChoice = Read-Host '업데이트 방식 선택 [1/2, Enter=1]'
-        if ($tcChoice -eq '2') { $Remote = $true }
+        if ($tcChoice -eq '2') { $Remote = $true; $tcSelectSource = $true }
         elseif ($tcChoice -ne '' -and $tcChoice -ne '1') { throw '[UPDATE_MODE] 1 또는 2를 선택하세요. 설정은 변경하지 않았습니다.' }
     }
-    if ($Remote) { Invoke-TcRemoteUpdate -CheckOnly:$CheckOnly; return }
+    if ($Remote) { Invoke-TcRemoteUpdate -CheckOnly:$CheckOnly -SelectSource:([bool]$tcSelectSource); return }
     $tcRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
     Initialize-TcPrerequisites -CheckOnly
     $tcClaude = Resolve-TcClaude ''
@@ -52,7 +52,7 @@ function Invoke-TcUpdate {
         if ([version]$tcVersion -lt [version]$tcBefore.version) { throw 'The copied package is older than the installed version. Downgrade was not performed.' }
         $tcMarkets = Invoke-TcUpdateCli $tcClaude @('plugin', 'marketplace', 'list', '--json') | ConvertFrom-Json
         $tcMarket = @($tcMarkets | Where-Object { $_.name -eq 'tc-manager-team' })
-        $tcFromRemote = $tcMarket.Count -eq 1 -and ($tcMarket[0].source -in @('git', 'github')) -and (Test-Path -LiteralPath (Join-Path $tcRoot 'update-source.json')) -and (Test-TcRemoteMarket $tcMarket[0] (Get-TcRemoteSource $tcRoot))
+        $tcFromRemote = $tcMarket.Count -eq 1 -and ($tcMarket[0].source -in @('git', 'github')) -and (Test-Path -LiteralPath (Join-Path $tcRoot 'update-source.json')) -and (Test-TcConfiguredRemoteMarket $tcMarket[0] $tcRoot)
         if ($tcMarket.Count -ne 1 -or (-not $tcFromRemote -and ($tcMarket[0].source -ne 'directory' -or -not (Test-TcSamePath $tcMarket[0].path $tcRoot)))) {
             throw 'The team marketplace points to a different folder. Copy the new contents into the original installed folder; no marketplace was redirected.'
         }
@@ -99,7 +99,7 @@ function Invoke-TcUpdate {
         if ($tcFromRemote) {
             $tcMarkets = Invoke-TcUpdateCli $tcClaude @('plugin', 'marketplace', 'list', '--json') | ConvertFrom-Json
             $tcMarket = @($tcMarkets | Where-Object { $_.name -eq 'tc-manager-team' })
-            if ($tcMarket.Count -ne 1 -or -not (Test-TcRemoteMarket $tcMarket[0] (Get-TcRemoteSource $tcRoot))) {
+            if ($tcMarket.Count -ne 1 -or -not (Test-TcConfiguredRemoteMarket $tcMarket[0] $tcRoot)) {
                 throw '[SOURCE_CHANGED] 갱신 중 원격 출처가 변경되었습니다. 로컬 ZIP으로 전환하지 않습니다.'
             }
             $tcPlugin = (Get-Item -LiteralPath (Join-Path $tcMarket[0].installLocation 'plugins/tc-manager')).FullName

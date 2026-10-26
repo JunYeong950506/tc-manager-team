@@ -1,4 +1,7 @@
 {
   "marketplace": "tc-manager-team",
-  "repository_url": "https://github.com/JunYeong950506/tc-manager-team.git"
+  "repository_url": "https://github.com/Junyeong-Heo212/tc-manager-team.git",
+  "fallback_repository_urls": [
+    "https://github.com/JunYeong950506/tc-manager-team.git"
+  ]
 }

@@ -1,12 +1,85 @@
 ﻿function Get-TcRemoteSource([string]$Root) {
     $tcConfig = Get-Content -LiteralPath (Join-Path $Root 'update-source.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-    $tcUri = [uri]$tcConfig.repository_url
-    if ($tcConfig.marketplace -ne 'tc-manager-team' -or $tcUri.Scheme -ne 'https' -or
+    if ($tcConfig.marketplace -ne 'tc-manager-team') { throw '[UPDATE_SOURCE] 마켓플레이스 이름이 다릅니다.' }
+    return Assert-TcRemoteUrl $tcConfig.repository_url
+}
+
+function Assert-TcRemoteUrl([string]$Url) {
+    $tcUri = $null
+    if (-not [uri]::TryCreate($Url, [UriKind]::Absolute, [ref]$tcUri) -or $tcUri.Scheme -ne 'https' -or
         -not $tcUri.Host -or $tcUri.UserInfo -or $tcUri.Query -or $tcUri.Fragment -or
-        $tcConfig.repository_url -match '\s' -or -not $tcUri.AbsolutePath.EndsWith('.git')) {
-        throw '[UPDATE_SOURCE] update-source.json에 인증정보 없는 HTTPS Git 저장소 주소가 필요합니다.'
+        $Url -match '[\s"<>`]' -or -not $tcUri.AbsolutePath.EndsWith('.git')) {
+        throw '[UPDATE_SOURCE] 인증정보 없는 HTTPS Git 저장소 주소(.git)가 필요합니다.'
     }
-    return $tcConfig.repository_url
+    return $Url
+}
+
+function Get-TcRemoteSources([string]$Root) {
+    Get-TcRemoteSource $Root
+    $tcConfig = Get-Content -LiteralPath (Join-Path $Root 'update-source.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    foreach ($tcUrl in @($tcConfig.fallback_repository_urls)) {
+        if ($tcUrl) { Assert-TcRemoteUrl $tcUrl }
+    }
+    $tcChoice = Join-Path $Root '.tc-manager/update-source-choice.json'
+    if (Test-Path -LiteralPath $tcChoice) {
+        Assert-TcRemoteUrl ((Get-Content -LiteralPath $tcChoice -Raw -Encoding UTF8 | ConvertFrom-Json).repository_url)
+    }
+}
+
+function Test-TcConfiguredRemoteMarket($Market, [string]$Root) {
+    foreach ($tcUrl in @(Get-TcRemoteSources $Root)) {
+        if (Test-TcRemoteMarket $Market $tcUrl) { return $true }
+    }
+    return $false
+}
+
+function Test-TcRemoteReadable([string]$Url) {
+    $null = Assert-TcRemoteUrl $Url
+    $tcInfo = New-Object Diagnostics.ProcessStartInfo
+    $tcInfo.FileName = (Get-Command git.exe -ErrorAction Stop).Source
+    $tcInfo.Arguments = '-c credential.interactive=false ls-remote --exit-code "' + $Url + '" HEAD'
+    $tcInfo.UseShellExecute = $false
+    $tcInfo.CreateNoWindow = $true
+    $tcInfo.RedirectStandardOutput = $true
+    $tcInfo.RedirectStandardError = $true
+    $tcInfo.EnvironmentVariables['GIT_TERMINAL_PROMPT'] = '0'
+    $tcInfo.EnvironmentVariables['GCM_INTERACTIVE'] = 'Never'
+    $tcProcess = New-Object Diagnostics.Process
+    $tcProcess.StartInfo = $tcInfo
+    try {
+        $null = $tcProcess.Start()
+        $tcOutput = $tcProcess.StandardOutput.ReadToEndAsync()
+        $tcError = $tcProcess.StandardError.ReadToEndAsync()
+        if (-not $tcProcess.WaitForExit(30000)) {
+            $null = & taskkill.exe /PID $tcProcess.Id /T /F 2>$null
+            $null = $tcProcess.WaitForExit(5000)
+            return $false
+        }
+        return $tcProcess.ExitCode -eq 0
+    } finally { $tcProcess.Dispose() }
+}
+
+function Select-TcRemoteSource([string]$Root, [switch]$Interactive) {
+    $tcDefault = Get-TcRemoteSource $Root
+    $tcConfig = Get-Content -LiteralPath (Join-Path $Root 'update-source.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    $tcFallbacks = @($tcConfig.fallback_repository_urls | Where-Object { $_ })
+    $tcCandidates = @($tcDefault) + $tcFallbacks
+    if ($Interactive) {
+        Write-Host ('1. 회사 Git (기본): ' + $tcDefault)
+        Write-Host ('2. 개인 Git: ' + ($tcFallbacks -join ', '))
+        Write-Host '3. Git 주소 직접 입력'
+        $tcChoice = Read-Host '저장소 선택 [1/2/3, Enter=1]'
+        if ($tcChoice -eq '2') { $tcCandidates = $tcFallbacks }
+        elseif ($tcChoice -eq '3') { $tcCandidates = @(Assert-TcRemoteUrl (Read-Host 'HTTPS Git 주소 (.git)')) }
+        elseif ($tcChoice -ne '' -and $tcChoice -ne '1') { throw '[UPDATE_SOURCE] 1, 2, 3 중 선택하세요.' }
+    }
+    foreach ($tcUrl in $tcCandidates) {
+        $null = Assert-TcRemoteUrl $tcUrl
+        Write-Host ('저장소 연결 확인: ' + $tcUrl)
+        if (Test-TcRemoteReadable $tcUrl) { return $tcUrl }
+        Write-Host '연결을 확인하지 못했습니다. 인증·접근 권한·네트워크를 확인하세요. 대체 주소가 있으면 계속 확인합니다.' -ForegroundColor Yellow
+    }
+    throw '[REMOTE_UNAVAILABLE] 접속 가능한 저장소가 없습니다. 기존 설치는 유지했습니다. 2번 실행 후 주소 직접 입력을 선택할 수 있습니다.'
 }
 
 function Get-TcRemoteInstall([string]$Claude, [string]$Root) {
@@ -47,13 +120,15 @@ function Set-TcMarketplaceAutoUpdate([string]$Path, [string]$Source, [bool]$Enab
 }
 
 function Invoke-TcRemoteUpdate {
-    param([switch]$CheckOnly)
+    param([switch]$CheckOnly, [switch]$SelectSource)
     $tcRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
     $tcUrl = Get-TcRemoteSource $tcRoot
     Write-Host ('업데이트 저장소: ' + $tcUrl)
     Write-Host ('작업 폴더: ' + $tcRoot)
     Initialize-TcPrerequisites -CheckOnly
     if (-not (Get-Command git.exe -ErrorAction SilentlyContinue)) { throw '[GIT_MISSING] Git이 필요합니다. Git for Windows 설치 후 이 CMD를 다시 실행하세요.' }
+    if (-not $CheckOnly) { $tcUrl = Select-TcRemoteSource $tcRoot -Interactive:$SelectSource }
+    Write-Host ('선택한 업데이트 저장소: ' + $tcUrl)
     $tcClaude = Resolve-TcClaude ''
     $tcProfile = if ($env:CLAUDE_CONFIG_DIR) { [IO.Path]::GetFullPath($env:CLAUDE_CONFIG_DIR) } else { Join-Path $env:USERPROFILE '.claude' }
     $tcSettings = Join-Path $tcRoot '.claude/settings.local.json'
@@ -75,6 +150,7 @@ function Invoke-TcRemoteUpdate {
         $tcMarket = @($tcMarkets | Where-Object { $_.name -eq 'tc-manager-team' })
         if ($tcMarket.Count -gt 1 -or ($tcMarket.Count -eq 1 -and
             -not (Test-TcRemoteMarket $tcMarket[0] $tcUrl) -and
+            -not (Test-TcConfiguredRemoteMarket $tcMarket[0] $tcRoot) -and
             -not ($tcMarket[0].source -eq 'directory' -and (Test-TcSamePath $tcMarket[0].path $tcRoot)))) {
             throw '[MARKETPLACE_CONFLICT] 같은 이름의 마켓플레이스가 다른 위치를 사용합니다. 다른 작업 폴더의 연결을 자동 변경하지 않았습니다.'
         }
@@ -138,6 +214,7 @@ function Invoke-TcRemoteUpdate {
         if ($tcWorkspace) { Save-TcWorkspaceConfiguration $tcWorkspace }
         Set-TcMarketplaceAutoUpdate $tcSettings $tcUrl $true
         Set-TcMarketplaceAutoUpdate $tcKnown $tcUrl $true -KnownMarketplaces
+        Write-TcJson (Join-Path $tcRoot '.tc-manager/update-source-choice.json') ([pscustomobject]@{repository_url=$tcUrl})
         $tcDisabled = @('DISABLE_UPDATES', 'DISABLE_AUTOUPDATER', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC') | Where-Object { [Environment]::GetEnvironmentVariable($_) -eq '1' }
         if ($tcDisabled -and $env:FORCE_AUTOUPDATE_PLUGINS -ne '1') {
             throw ('[AUTO_UPDATE_DISABLED] 설치는 완료했지만 환경 설정으로 자동 갱신이 차단됩니다: ' + ($tcDisabled -join ', ') + '. 해당 설정은 변경하지 않았습니다.')

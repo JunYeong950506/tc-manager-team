@@ -4,7 +4,7 @@
 
 ## 배포 저장소
 
-저장소: https://github.com/JunYeong950506/tc-manager-team (공개). 연결 URL은 `https://github.com/JunYeong950506/tc-manager-team.git`입니다. 팀원은 다운로드·업데이트를 위해 별도 저장소 초대나 GitHub 인증을 받을 필요가 없습니다. 이 저장소를 받는 것만으로 각 PC의 Claude 연결이나 자동 업데이트가 켜지는 것은 아닙니다. SQMA 작업 폴더나 팀원의 기존 설치 폴더 전체를 Git으로 올리지 않습니다.
+기본 저장소: https://github.com/Junyeong-Heo212/tc-manager-team (회사 계정, 비공개). 회사 저장소는 Git 인증과 저장소 접근 권한이 필요합니다. 대체 저장소: https://github.com/JunYeong950506/tc-manager-team (개인 계정, 공개). 이 저장소를 받는 것만으로 각 PC의 Claude 연결이나 자동 업데이트가 켜지는 것은 아닙니다. SQMA 작업 폴더나 팀원의 기존 설치 폴더 전체를 Git으로 올리지 않습니다.
 
 ## 업데이트 범위
 
@@ -19,6 +19,8 @@
 
 1.5.10부터 설치 CMD 재실행과 1번 ZIP 업데이트는 기존 Git 출처·자동 업데이트 설정을 유지합니다. 원격 사용자의 플러그인은 기존 원격에서 갱신하며, 연결 실패나 ZIP보다 오래된 원격 버전은 로컬 ZIP으로 자동 전환하지 않습니다. 이 보호 동작은 새 ZIP의 설치·업데이트 스크립트를 적용해야 사용할 수 있습니다.
 
+1.5.12: 4번 CMD → 2번 → Enter는 회사 Git을 먼저 확인하고 연결 실패 시 개인 Git을 확인합니다. 저장소 메뉴의 2번은 개인 Git, 3번은 HTTPS Git 주소 직접 입력입니다. 이 동작은 CMD 실행 시 적용되며, Claude 자동 업데이트는 마지막으로 등록된 한 저장소를 사용합니다. 회사 Git 인증·권한을 설정한 뒤 4번 CMD → 2번으로 다시 연결할 수 있습니다.
+
 원격 주소는 루트 `update-source.json`에서 관리합니다. 다른 담당자에게 인계하거나 사내 Git으로 옮겨도 ZIP 방식을 계속 쓸 수 있습니다. 기존 원격 사용자의 출처 변경 순서는 [인계 안내](SETUP-WINDOWS.md#다른-담당자에게-인계)를 따릅니다.
 
 ## Claude Code에 Git 원격 연결
@@ -26,7 +28,7 @@
 등록 이름 `tc-manager-team`이 없는 경우, 실제 저장소 URL로 다음을 실행합니다. 토큰을 URL에 넣지 않습니다. 비공개 저장소는 각 PC의 Git 인증이 미리 되어 있어야 합니다.
 
 ```text
-claude plugin marketplace add https://github.com/JunYeong950506/tc-manager-team.git --scope local
+claude plugin marketplace add https://github.com/Junyeong-Heo212/tc-manager-team.git --scope local
 claude plugin install tc-manager@tc-manager-team --scope local
 ```
 
