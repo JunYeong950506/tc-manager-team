@@ -8,7 +8,7 @@ user-invocable: false
 
 사용자 요청: $ARGUMENTS
 
-Story↔TC 연결, 작성 근거, Story/TC 검색, TC 없는 Story 조회 요청은 `../../references/story-traceability.md`와 `../../references/library.md`로 처리한다. 조회 요청을 신규 생성이나 변경으로 해석하지 않는다.
+Epic↔Story↔TC 연결, 기능별 TC, 작성 근거, Story/TC 검색, TC 없는 Story 조회 요청은 `../../references/story-traceability.md`와 `../../references/library.md`로 처리한다. 조회 요청을 신규 생성이나 변경으로 해석하지 않는다.
 
 약식 수행 준비·상태 조회·실행 피드백 반영 요청이면 `../../references/readiness-workflow.md`를 읽어 기존 TC 버전과 연결한다. 피드백에 TC 보완이 필요할 때만 아래 convert 절차로 이어간다. 실제 테스트를 수행하라는 요청은 실행 Agent용 handoff까지 준비하고, 실행 도구가 없으면 미수행을 명시한다.
 
@@ -24,3 +24,6 @@ Story↔TC 연결, 작성 근거, Story/TC 검색, TC 없는 Story 조회 요청
 수정 의견·재개 요청은 직전 작업의 workflow.json과 산출물에서 업무와 완료 항목을 확인한다. 새 업무를 만들거나 원격 생성부터 반복하지 않는다. 기존 TC가 요구사항의 참고 자료일 뿐이고 신규 작성이 목적이면 create이다. 복합 요청은 plan이 범위를 관리하고 필요한 작성만 수행한다. 명령 안에서 동일 Skill을 재귀 호출하지 않는다. 의도가 구분되지 않을 때만 목적을 한 번 질문한다.
 
 이전 workflow.json의 mode가 prepare이면 plan 업무로 해석해 이어간다. 저장된 원격 key와 완료 상태는 유지한다.
+
+
+1.6.0 작성 상태·재개: `../../references/authoring-status.md`를 읽는다. TC 초안·대기 사유·재개 조건을 후보별로 저장한다. 초안만 요청하면 등록 목적지/폴더 선택 없이 진행하고, 실제 등록 직전에 프로젝트·Epic 폴더/직접 지정/임시 폴더를 선택한다. 신규 등록 후에는 verified 재조회와 사람 검토 근거를 사용해 등록 완료를 저장한다.

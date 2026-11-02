@@ -11,7 +11,7 @@ import tc_story_sources as source_views
 WRITE_OPS = {"stories.import", "stories.links.record"}
 OPERATIONS = {
     "stories.import": ({"namespace", "stories", "scope"}, {"source_records"}),
-    "stories.search": ({"namespace"}, {"q", "limit", "offset", "unlinked"}),
+    "stories.search": ({"namespace"}, {"q", "limit", "offset", "unlinked", "created_from", "created_through"}),
     "stories.lookup": ({"namespace", "q"}, {"limit", "offset", "team", "inventory", "scope"}),
     "stories.get": ({"namespace", "key"}, {"include_history", "include_source"}),
     "stories.for-case": ({"namespace", "tc_id"}, {"version"}),
@@ -199,7 +199,7 @@ def case_links(db, namespace, tc_id, version=None):
             for link in source_links:
                 story = current_stories(db, link['namespace']).get(link['key'])
                 if story:
-                    found.append(dict(story=content_view(story), relation='ISSUE_LINK'))
+                    found.append(dict(story=content_view(story), relation=link.get('relation', 'ISSUE_LINK')))
                 else:
                     unresolved.append(link)
             return dict(tc_id=tc_id, status='source_catalog', stories=found, unresolved_links=unresolved, source_status=catalog.status(db, namespace),
@@ -258,7 +258,13 @@ def execute(db, namespace, op, args, actor="local-user"):
     if op == "stories.links.plan":
         return plan(db, namespace, args)
     if op == "stories.for-case":
-        return case_links(db, namespace, args["tc_id"], args.get("version"))
+        result = case_links(db, namespace, args["tc_id"], args.get("version"))
+        import tc_epics
+        for item in result.get('stories', []):
+            key = item['story']['key']
+            if key.rsplit('-', 1)[0] == namespace.rsplit('/', 1)[-1]:
+                item['hierarchy'] = tc_epics.for_story(db, namespace, key)
+        return result
     stories = current_stories(db, namespace)
     index = case_index(db, namespace)
     if op == "stories.lookup":
@@ -272,6 +278,8 @@ def execute(db, namespace, op, args, actor="local-user"):
         if key not in stories:
             raise ValueError("수집되지 않은 Story입니다")
         result = dict(story=content_view(stories[key]), cases=related_cases(index, stories[key], db, namespace), source_status=catalog.status(db, namespace))
+        import tc_epics
+        result['hierarchy'] = tc_epics.for_story(db, namespace, key)
         if args.get("include_history"):
             result["history"] = [dict(row) for row in db.execute("SELECT content_hash,updated_at FROM story_snapshots WHERE namespace=? AND issue_key=? ORDER BY updated_at DESC", (namespace, key))]
             result['history'] += source_views.history(db, namespace, key)
@@ -287,8 +295,16 @@ def execute(db, namespace, op, args, actor="local-user"):
     terms = registry.tokens(query)
     if query and not terms:
         raise ValueError("검색 가능한 단어가 필요합니다")
+    dated_keys = None
+    if args.get('created_from') or args.get('created_through'):
+        start, end = args.get('created_from'), args.get('created_through')
+        if any(not isinstance(v, str) or not re.fullmatch(r'\d{4}-(0[1-9]|1[0-2])', v) for v in [start, end]) or start > end:
+            raise ValueError('Story 생성 기간을 확인하세요')
+        dated_keys = {r[0] for r in db.execute('SELECT issue_key FROM dashboard_story_dates WHERE namespace=? AND created_month>=? AND created_month<=?', (namespace, start, end))}
     items = []
     for story in sorted(stories.values(), key=lambda s: s["key"]):
+        if dated_keys is not None and story["key"] not in dated_keys:
+            continue
         fields = {k: sorted(terms & registry.tokens(story[k])) for k in ("key", "title", "description", "acceptance_criteria")}
         matched = set().union(*(set(value) for value in fields.values()))
         if terms and not matched:

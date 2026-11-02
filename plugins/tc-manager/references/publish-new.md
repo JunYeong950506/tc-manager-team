@@ -4,6 +4,8 @@
 
 ## 등록 대상
 
+실제 등록을 요청한 경우에만 `authoring-status.md`의 등록 직전 프로젝트·폴더 선택을 먼저 적용한다. 초안 작성만 요청하면 목적지를 요구하거나 prepare를 필수로 실행하지 않는다.
+
 목적지는 사용자 요청·TC/Jira 키·링크에서 확인한다. 프로젝트의 `.tc-manager/target.json`은 site·project_keys 후보 목록일 수 있으므로 등록 명령에 그대로 넘기지 않는다. 작업 폴더에 별도 target.json을 만들고 단일 `site`, `project_key`, `folder_id`, `folder_name`을 확정한다. `project_id`는 실제 Zephyr ID를 알 때만 넣는다. token_project_key는 토큰 페이지용으로 등록 대상이 아니다. 이름만으로 폴더 ID를 추측하지 않는다. 같은 이름의 다른 프로젝트·하위 폴더를 포함하지 않는다. 설정은 사용자 요청·권한을 대신하지 않는다. 팀원 계정·토큰·PC 경로·TC 키는 스킬에 고정하지 않는다.
 
 `python -X utf8 <plugin>/scripts/tc_draft.py prepare draft.json --target <target.json> --output <작업폴더>/prepared`
@@ -37,3 +39,6 @@ Zephyr의 대상 프로젝트·폴더에서 More → Import from file → Zephyr
 XML 가져오기 후 MCP 재조회도 불가능하면 Zephyr UI에서 **생성된 그 TC만 선택해 Export to XML**로 다시 내보낸다. 원래 가져오기 파일을 재조회 근거로 쓰지 않는다. `tc_draft.py verify-xml <prepared> --export <실제내보내기.xml> --folder-path <UI에서확인한전체폴더경로>`로 원격 key·전체 폴더 경로·제목·본문·모든 단계의 일치를 확인한다. 이 방법은 XML 내보내기 대조이며 API 재조회로 표시하지 않는다. 성공 화면·실제 key·폴더 URL도 함께 보존한다.
 
 제목·원격 key/링크·실제 목적지·본문/단계 대조 결과·사용한 경로(MCP/Import)·남은 질문을 짧게 보여준다. Markdown/JSON/XML 경로도 제공한다. 검증 완료 후 library.md에 따라 실제 원격 key의 확인본을 DB에 저장한다. 실제 테스트 실행은 수행하지 않았다고 명확히 구분한다.
+
+
+검증 완료 후 `authoring-status.md`에 따라 원래 후보ID에 등록 완료·실제 key·재조회 해시·사람 검토 근거를 저장한다. 공용 DB 저장 실패는 원격 등록 실패와 구분하며 원격 TC를 다시 생성하지 않는다.

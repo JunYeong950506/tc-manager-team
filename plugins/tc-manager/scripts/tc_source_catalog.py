@@ -7,15 +7,15 @@ from datetime import datetime, timezone
 
 import tc_registry as registry
 
-TEAMS = ('all', 'SQA', 'SQE', 'unclassified')
+TEAMS = ('all', 'SQA', 'SQE', 'other')
 INVENTORIES = ('all', 'active', 'excluded', 'test')
 SCOPES = ('all', 'px-kpi')
 KPI = json.loads(Path(__file__).with_name('tc_kpi_scope.json').read_text(encoding='utf-8'))
 
 
 def validate_scope(team='all', inventory='all', scope='all'):
-    if team not in TEAMS or inventory not in INVENTORIES or scope not in SCOPES:
-        raise ValueError('team은 all/SQA/SQE/unclassified, inventory는 all/active/excluded/test, scope는 all/px-kpi여야 합니다')
+    if team not in (*TEAMS, 'unclassified') or inventory not in INVENTORIES or scope not in SCOPES:
+        raise ValueError('team은 all/SQA/SQE/other, inventory는 all/active/excluded/test, scope는 all/px-kpi여야 합니다')
 
 
 def kpi_membership(namespace, raw):
@@ -49,13 +49,16 @@ def kpi_map(db, namespace):
 def folder_scope(folder):
     parts = [part.strip() for part in folder.split('/') if part.strip()]
     labels = set(re.findall(r'(?<![A-Z0-9])(SQA|SQE)(?![A-Z0-9])', '/'.join(parts).upper()))
-    team = next(iter(labels)) if len(labels) == 1 else 'unclassified'
+    team = next(iter(labels)) if len(labels) == 1 else 'other'
+    reason = ('folder_unassigned' if not parts or parts == ['Root'] else
+              'folder_team_conflict' if len(labels) > 1 else 'folder_no_team' if not labels else 'folder_team_name')
     inventory = 'excluded' if any('카운트 금지' in part for part in parts) else (
         'test' if parts and parts[0].lower().startswith('[test]') else 'active')
-    return dict(team=team, inventory_status=inventory, classification_basis='folder_path', folder=folder)
+    return dict(team=team, inventory_status=inventory, classification_basis='folder_path', classification_reason=reason, folder=folder)
 
 
 def in_scope(scope, team='all', inventory='all'):
+    team = 'other' if team == 'unclassified' else team
     return (team == 'all' or scope['team'] == team) and (inventory == 'all' or scope['inventory_status'] == inventory)
 
 
@@ -108,6 +111,15 @@ def available(db, namespace):
                 and db.execute("SELECT 1 FROM source_sync WHERE namespace=?", (namespace,)).fetchone())
 
 
+def complete_catalog(db, namespace):
+    if not available(db, namespace):
+        return False
+    summary = json.loads(db.execute('SELECT summary_json FROM source_sync WHERE namespace=?', (namespace,)).fetchone()[0])
+    if 'catalog_complete' in summary:
+        return summary['catalog_complete'] is True
+    return not summary.get('partial') and summary.get('scope_type') != 'notified_keys'
+
+
 def status(db, namespace):
     daily = None
     if db.execute("SELECT 1 FROM sqlite_master WHERE name='source_refresh_state'").fetchone():
@@ -124,6 +136,8 @@ def status(db, namespace):
 
 def replace(db, namespace, cases, links, completed_at, summary, protected_cases=(), protected_stories=(), partial=False):
     initialize(db)
+    import tc_dashboard as dashboard
+    dashboard.initialize(db)
     prepared = []
     seen = set()
     existing = {row['tc_id']: row['raw_json'] for row in db.execute('SELECT tc_id,raw_json FROM source_test_cases WHERE namespace=?', (namespace,))}
@@ -155,13 +169,27 @@ def replace(db, namespace, cases, links, completed_at, summary, protected_cases=
     db.executemany('INSERT INTO source_story_links VALUES (?,?,?) ON CONFLICT(namespace,issue_key) DO UPDATE SET links_json=excluded.links_json', changed_links)
     summary['tc_rows_written'] = len(prepared)
     summary['link_rows_written'] = len(changed_links)
+    changed_keys = {item[1] for item in prepared}
+    dashboard.upsert(db, namespace, [row for row in cases if row['key'] in changed_keys], completed_at)
+    dashboard.reclassify_teams(db)
+    if not partial:
+        db.executemany('DELETE FROM dashboard_cases WHERE namespace=? AND tc_id=?', [(namespace, key) for key in existing if key not in seen and key not in protected_cases])
+    dashboard.update_links(db, namespace, {key: value for key, value in links.items() if key not in protected_stories},
+                           [key for key in old_links if not partial and key not in links and key not in protected_stories])
     if partial and available(db, namespace):
         return
+    summary['catalog_complete'] = not partial
     db.execute("INSERT INTO source_sync VALUES (?,?,?) ON CONFLICT(namespace) DO UPDATE SET completed_at=excluded.completed_at, summary_json=excluded.summary_json",
                (namespace, completed_at, registry.canonical(summary)))
 
 
 def story_cases(db, namespace, issue_key):
+    if available(db, namespace) and db.execute("SELECT 1 FROM sqlite_master WHERE name='dashboard_links'").fetchone():
+        rows = [dict(row) for row in db.execute("SELECT l.tc_id,l.namespace,c.title,c.folder,c.inventory,l.relation,l.basis,CASE WHEN c.tc_id IS NULL THEN 'not_collected' ELSE 'collected' END AS content_status FROM dashboard_links l LEFT JOIN dashboard_cases c ON c.namespace=l.namespace AND c.tc_id=l.tc_id WHERE l.story_namespace=? AND l.story_key=?", (namespace, issue_key))]
+        for row in rows:
+            row['team_scope'] = folder_scope(row['folder'] or '')
+        complete = {target: complete_catalog(db, target) for target in {row['namespace'] for row in rows}}
+        return [row for row in rows if not (row['basis'] == 'recorded_readback' and row['content_status'] == 'not_collected' and complete[row['namespace']])]
     if not available(db, namespace):
         return None
     row = db.execute("SELECT links_json FROM source_story_links WHERE namespace=? AND issue_key=?", (namespace, issue_key)).fetchone()
@@ -178,6 +206,11 @@ def story_cases(db, namespace, issue_key):
 
 
 def case_stories(db, namespace, tc_id):
+    if available(db, namespace) and db.execute("SELECT 1 FROM sqlite_master WHERE name='dashboard_links'").fetchone():
+        rows = [dict(row) for row in db.execute('SELECT story_namespace AS namespace,story_key AS key,relation,basis FROM dashboard_links WHERE namespace=? AND tc_id=?', (namespace, tc_id))]
+        missing = not db.execute('SELECT 1 FROM dashboard_cases WHERE namespace=? AND tc_id=?', (namespace, tc_id)).fetchone()
+        retired = missing and complete_catalog(db, namespace)
+        return [row for row in rows if not (retired and row['basis'] == 'recorded_readback')]
     if not available(db, namespace):
         return None
     if not db.execute("SELECT 1 FROM source_test_cases WHERE namespace=? AND tc_id=?", (namespace, tc_id)).fetchone():

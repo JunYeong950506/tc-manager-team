@@ -35,6 +35,18 @@ TC 쪽 키워드 검색도 함께 수행하고 Story·TC별 출처와 연결 여
 
 Jira 검색 응답을 초기 데이터로 변환할 때는 `tc_story_intake.py --site <site> --project <project> --input capture.json --output <새폴더>`를 사용한다. capture에는 실제 `query`, `observed_at`, Jira 필드 ID→이름의 `field_names`, `pages` 배열을 넣는다. 각 페이지는 `request_token`과 원본 `response`를 포함한다. 도구 오류를 빈 issues로 바꾸지 않는다. ADF 문단·목록·링크와 원본 JSON을 보존하며, 불완전한 페이지/지원하지 않는 ADF 구조는 완료로 처리하지 않는다. 생성된 `stories-*.json`만 stories-import에 전달한다. 입력 자료와 초기 DB에는 회사 정보가 있으므로 공개 Git/팀 플러그인 ZIP에 넣지 않는다.
 
+## 에픽 기준 기능 조회
+
+기능 에픽의 요구사항과 TC를 함께 확인할 때는 `epics-search "기능명"`으로 에픽을 찾고 `epic <에픽키>`로 하위 Story와 연결 TC를 조회한다. TC에서 상위 기능을 찾는 요청은 `tc-epics <TC키>`를 사용한다. 에픽 검색과 상세의 나머지 페이지는 `--limit`, `--offset`으로 읽는다. 프로젝트·에픽·Story·TC의 원본 키와 링크를 유지하고, 에픽별 TC 수는 동일 TC의 여러 Story 연결을 중복 계산하지 않은 수를 사용한다.
+
+```text
+python -X utf8 <plugin>/scripts/tc_library.py --site <site> --project <project> epics-search "레이아웃"
+python -X utf8 <plugin>/scripts/tc_library.py --site <site> --project <project> epic <에픽키>
+python -X utf8 <plugin>/scripts/tc_library.py --site <site> --project <project> tc-epics <TC키>
+```
+
+이 조회는 에픽 수집을 지원하는 공용 서버 코드와 서버의 Jira 에픽·상위 연결 수집이 필요하다. 스킬만 갱신했거나 아직 수집하지 않은 DB는 에픽 정보가 없을 수 있다. 미수집·조회 실패·확인된 상위 에픽 없음은 서로 구분한다. TC 연결 미확인은 수집 범위에서의 관찰 결과이며 실제 TC 부재나 미검증 확정이 아니다. 다른 프로젝트의 상위 에픽이 반환되면 해당 프로젝트 namespace에서 별도로 확인하고, 현재 프로젝트 조회만으로 다른 프로젝트 전체를 확인했다고 보고하지 않는다. 에픽명이 릴리스 단위일 수도 있으므로 모든 에픽을 기능으로 재분류하지 않는다. 조회 명령은 Jira·Zephyr 등록이나 변경을 수행하지 않는다.
+
 ## 신규 TC의 원본 Jira 연결
 
 승인한 등록 범위에 원본 Jira 티켓이 있다면 본문·Script 등록 후 다음 절차를 수행한다. Story 하나에 여러 TC, TC 하나에 여러 Story를 지원한다. 연결 도구의 실제 세션 스키마는 `zephyr-mcp-contract.md`와 대조한다.

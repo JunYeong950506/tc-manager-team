@@ -68,6 +68,17 @@ def store(db, namespace, rows, records, scope, actor, legacy):
         if (not selected or (row['updated_at'], row['fetched_at']) >= (selected['updated_at'], selected['observed_at'])):
             db.execute('INSERT INTO story_source_heads VALUES (?,?,?,?) ON CONFLICT(namespace,issue_key) DO UPDATE SET source_hash=excluded.source_hash,view_hash=excluded.view_hash',
                 (namespace, row['key'], source_hash, view_hash))
+    import tc_dashboard
+    tc_dashboard.initialize(db)
+    for record in records:
+        raw = record['raw_issue']
+        head = db.execute('SELECT source_hash FROM story_source_heads WHERE namespace=? AND issue_key=?', (namespace, record['key'])).fetchone()
+        if head and head['source_hash'] == registry.digest(raw):
+            tc_dashboard.upsert_story_status(db, namespace, raw)
+        created = raw.get('fields', {}).get('created')
+        if tc_dashboard.month(created):
+            db.execute('INSERT OR REPLACE INTO dashboard_story_dates VALUES (?,?,?,?)',
+                       (namespace, record['key'], created, tc_dashboard.month(created)))
     keys = [row['key'] for row in rows]
     # Fetch time is metadata, not another copy of the source or search text.
     collection_hash = registry.digest(dict(query=scope['query'], keys=keys, sources=[registry.digest(r['raw_issue']) for r in records]))

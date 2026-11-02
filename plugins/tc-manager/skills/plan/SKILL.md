@@ -8,7 +8,7 @@ argument-hint: 시험 목적·범위·릴리스 또는 변경 티켓
 
 사용자 요청: $ARGUMENTS
 
-Story↔TC·작성 근거·미연결 후보의 조회만 요청했다면 `../../references/story-traceability.md`와 `../../references/library.md`로 처리하고 아래 테스트 준비·Cycle 생성 절차를 시작하지 않는다.
+Epic↔Story↔TC·기능별 TC·작성 근거·미연결 후보의 조회만 요청했다면 `../../references/story-traceability.md`와 `../../references/library.md`로 처리하고 아래 테스트 준비·Cycle 생성 절차를 시작하지 않는다.
 
 `../../references/workflow.md`와 `../../references/library.md`를 읽는다. 제품 테스트를 실행하지 않는다.
 
@@ -19,3 +19,6 @@ Story↔TC·작성 근거·미연결 후보의 조회만 요청했다면 `../../
 5. 최종 검토 후 `test-preparation.md`에 따라 실제 제공 도구로 구성한다. Test Cases와 Test Cycles의 동명 폴더는 다른 대상이다. TEST_CYCLE 폴더와 실제 Cycle key를 확인하고 반복 연결은 번들 `scripts/tc_cycle.py`의 check → apply → verify를 사용한다. TC마다 모델/MCP 호출을 반복하거나 임시 연결 코드를 새로 만들지 않는다. 기존 승인된 범위를 재승인받지 않는다. 생성 key·TC별 연결 결과·재조회·실패 지점을 기록한다. 신규 작성 TC는 등록 완료 후 실제 키로 포함한다.
 
 결과: 시험 목적·선정된 TC·선정/제외 이유·보완한 TC·부족한 범위·실제 Cycle/폴더 위치. 자동 Test Plan 객체·Confluence 문서 발행·제품 실행은 요청한 경우에만 별도 범위로 다룬다.
+
+
+1.6.0 작성 상태·재개: `../../references/authoring-status.md`를 읽는다. TC 초안·대기 사유·재개 조건을 후보별로 저장한다. 초안만 요청하면 등록 목적지/폴더 선택 없이 진행하고, 실제 등록 직전에 프로젝트·Epic 폴더/직접 지정/임시 폴더를 선택한다. 신규 등록 후에는 verified 재조회와 사람 검토 근거를 사용해 등록 완료를 저장한다.

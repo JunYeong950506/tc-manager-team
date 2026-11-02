@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 import tc_registry as registry
 import tc_draft as draft_core
 import tc_stories as stories
+import tc_epics as epics
 import tc_source_catalog as catalog
 from tc_shared import Remote
 from tc_outbox import operation_id
@@ -180,6 +181,16 @@ def story_call(db_path, namespace, op, args):
         return stories.execute(db, namespace, op, args)
 
 
+def epic_call(db_path, namespace, op, args):
+    if isinstance(db_path, Remote):
+        return db_path.rpc(op, args)
+    if not db_path.is_file():
+        return dict(status="unavailable", reason="DB 미생성")
+    with closing(registry.connect(db_path)) as db, db:
+        db.execute("BEGIN")
+        return epics.execute(db, namespace, op, args)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path(".tc-manager/library.json"))
@@ -228,6 +239,16 @@ def main():
     p = commands.add_parser("tc-stories")
     p.add_argument("tc_id")
     p.add_argument("--version")
+    p = commands.add_parser("epics-search")
+    p.add_argument("query", nargs="?", default="")
+    p.add_argument("--limit", type=int, default=20)
+    p.add_argument("--offset", type=int, default=0)
+    p = commands.add_parser("epic")
+    p.add_argument("key")
+    p.add_argument("--limit", type=int, default=20)
+    p.add_argument("--offset", type=int, default=0)
+    p = commands.add_parser("tc-epics")
+    p.add_argument("tc_id")
     for command in ("link-plan", "link-record", "ingest"):
         p = commands.add_parser(command)
         p.add_argument("file", type=Path)
@@ -295,6 +316,12 @@ def main():
         result = story_call(db, namespace, "stories.get", dict(key=args.key, include_history=args.include_history))
     elif args.command == "tc-stories":
         result = story_call(db, namespace, "stories.for-case", dict(tc_id=args.tc_id, version=args.version))
+    elif args.command == "epics-search":
+        result = epic_call(db, namespace, "epics.search", dict(q=args.query, limit=args.limit, offset=args.offset))
+    elif args.command == "epic":
+        result = epic_call(db, namespace, "epics.get", dict(key=args.key, limit=args.limit, offset=args.offset))
+    elif args.command == "tc-epics":
+        result = epic_call(db, namespace, "epics.for-case", dict(tc_id=args.tc_id))
     elif args.command in {"link-plan", "link-record"}:
         result = story_call(db, namespace, "stories.links." + ("plan" if args.command == "link-plan" else "record"), draft_core.load(args.file))
     elif args.command == "ingest":

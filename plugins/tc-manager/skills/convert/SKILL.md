@@ -23,3 +23,6 @@ argument-hint: TC 링크·파일·프로젝트와 폴더
 Zephyr HTML 원문은 `../../scripts/tc_source.py <원문JSON> --output <새평문JSON>`으로 별도 작업본을 만든다. 이 도구는 원문 JSON의 objective/precondition/description/testData/expectedResult만 평문으로 변환한다. 원문·첨부·위임 단계·커스텀 필드는 보존하며 평문 작업본은 시각적 첨부를 읽은 근거가 아니다. 이미 평문인 초안이나 HTML 문자열 자체를 시험하는 입력값에는 이 변환을 반복 적용하지 않는다.
 
 대량 작업도 `examples/draft.json`의 내부 필드 `step/test_data/expected_result`를 사용한다. 원격 API 필드 `description/testData/expectedResult`를 초안에 그대로 복사하지 않는다. 첫 TC의 공용 형식·DB 저장을 확인한 뒤 나머지를 처리하고 초안 저장을 사람 승인까지 미루지 않는다. 사람 승인은 원격 반영과 구별한다. 제목이 같은 환경별 TC는 원문 전체를 대조한 뒤 자료 탐색을 재사용하되 환경·노드 역할·초기 상태의 차이는 별도로 점검한다.
+
+
+1.6.0 작성 상태·재개: `../../references/authoring-status.md`를 읽는다. TC 초안·대기 사유·재개 조건을 후보별로 저장한다. 초안만 요청하면 등록 목적지/폴더 선택 없이 진행하고, 실제 등록 직전에 프로젝트·Epic 폴더/직접 지정/임시 폴더를 선택한다. 신규 등록 후에는 verified 재조회와 사람 검토 근거를 사용해 등록 완료를 저장한다.
