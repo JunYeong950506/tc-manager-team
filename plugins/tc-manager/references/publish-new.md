@@ -12,7 +12,7 @@
 
 이 명령은 구조 검사와 `report.md`, `create.json`, `steps.json`, `import-as-new.xml`, `state.json`을 만든다. 초안만 요청하면 여기서 결과를 보여준다. blockers가 있으면 보고서만 남기고 등록 payload를 만들지 않는다. 코드 검사는 내용의 진실성이나 실제 수행 가능성을 보증하지 않는다.
 
-1.5.9부터 새로 만드는 TC의 Labels에는 `ai_agent`를 기본 추가한다. 사용자가 지정하거나 신규 초안으로 가져온 라벨은 `draft.json`의 선택 항목 `labels` 문자열 배열에 보존한다. prepare는 이 배열과 `ai_agent`를 중복 없이 합쳐 MCP용 create.json과 XML에 넣고, state.json의 required_labels로 재조회 기준을 저장한다. 라벨을 `ai_agent` 하나로 대체하지 않는다. 기존 TC의 조회·재사용·수정에는 이 규칙을 소급 적용하지 않고, 이전 버전에서 이미 생성한 TC의 작업 재개에도 자동 추가하지 않는다.
+1.5.9부터 새로 만드는 TC의 Labels에는 `ai_agent`를 기본 추가한다. 사용자가 명시적으로 지정한 라벨과 사용자가 제공한 초안에 이미 포함된 라벨만 `draft.json`의 선택 항목 `labels` 문자열 배열에 보존한다. prepare는 이 배열과 `ai_agent`를 중복 없이 합쳐 MCP용 create.json과 XML에 넣고, state.json의 required_labels로 재조회 기준을 저장한다. 자동으로 추가할 수 있는 라벨은 `ai_agent`뿐이다. 시나리오·제목·본문·Jira 내용에서 라벨을 추론하거나 `stability`, `performance` 등의 분류 라벨을 임의 생성하지 않는다. 사용자 지정·제공 라벨을 `ai_agent` 하나로 대체하지 않는다. 기존 TC의 조회·재사용·수정에는 이 규칙을 소급 적용하지 않고, 이전 버전에서 이미 생성한 TC의 작업 재개에도 자동 추가하지 않는다.
 
 Precondition의 구역 제목과 각 항목은 별도 줄, 구역 사이는 빈 줄이어야 한다. 형식 오류가 나오면 초안의 줄 구분을 고쳐 다시 prepare한다. create.json의 objective/precondition은 HTML 줄바꿈을 포함한 전송용 값이다. MCP 호출 시 draft.json의 평문이나 plain() 결과로 바꾸지 않고 그대로 전달한다. verify의 `objective.layout`/`precondition.layout` 불일치는 줄 구분 유실이므로 같은 TC에서 수정·재조회하며 신규 생성하지 않는다.
 
